@@ -19,6 +19,7 @@ public-data = ["akshare>=1.14"]
 
 [project.scripts]
 cneq-build-dividend-quality-snapshot = "cn_equity_snapshot_pipelines.dividend_quality:main"
+cneq-stage-akshare-dividend-quality = "cn_equity_snapshot_pipelines.akshare_staging:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
