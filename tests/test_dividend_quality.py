@@ -10,9 +10,11 @@ def test_build_dividend_quality_snapshot_writes_artifact_pack(tmp_path: Path):
     result = build_and_write_snapshot(
         factor_snapshot_path=sample,
         output_dir=tmp_path,
+        as_of="2026-02-25",
     )
 
     assert len(result.snapshot) == 4
+    assert "as_of" in result.snapshot.columns
     assert not result.ranking.empty
     for key in ("snapshot", "manifest", "ranking", "release_summary"):
         assert result.artifact_paths[key].exists()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -127,6 +128,9 @@ def build_factor_snapshot_from_akshare(
             }
         )
     frame = pd.DataFrame(rows, columns=list(FACTOR_SNAPSHOT_COLUMNS))
+    if "as_of" not in frame.columns and "snapshot_date" not in frame.columns:
+        stamp = datetime.now(timezone.utc).date().isoformat()
+        frame.insert(0, "as_of", stamp)
     diagnostics["row_count"] = len(frame)
     return frame, diagnostics
 
