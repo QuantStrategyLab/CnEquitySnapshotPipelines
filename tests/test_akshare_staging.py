@@ -9,6 +9,20 @@ from cn_equity_snapshot_pipelines.akshare_market_history import build_market_his
 from cn_equity_snapshot_pipelines.akshare_staging import build_factor_row_from_akshare, build_factor_snapshot_from_akshare
 
 
+def test_resolve_universe_symbols_expanded_from_fhps():
+    from cn_equity_snapshot_pipelines.akshare_staging import resolve_universe_symbols
+
+    fhps = pd.DataFrame(
+        [
+            {"代码": "601088", "名称": "中国神华", "现金分红-股息率": 0.06},
+            {"代码": "600519", "名称": "贵州茅台", "现金分红-股息率": 0.05},
+            {"代码": "601398", "名称": "工商银行", "现金分红-股息率": 0.015},
+        ]
+    )
+    symbols = resolve_universe_symbols(object(), fhps, mode="expanded", expanded_top_n=2)
+    assert symbols == ("601088", "600519")
+
+
 def test_build_factor_snapshot_falls_back_to_sample():
     sample_path = Path(__file__).resolve().parents[1] / "examples" / "dividend_quality" / "factor_snapshot.sample.csv"
     frame, diagnostics = build_factor_snapshot_from_akshare(
@@ -16,6 +30,7 @@ def test_build_factor_snapshot_falls_back_to_sample():
         sample_fallback_path=sample_path,
         min_rows=1,
         as_of="2026-06-27",
+        sector_map={},
     )
     assert diagnostics["source"] == "sample_fallback"
     assert "as_of" in frame.columns

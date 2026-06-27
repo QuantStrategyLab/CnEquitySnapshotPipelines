@@ -51,7 +51,7 @@ def _coerce_float(value: Any, default: float = 0.0) -> float:
     return resolved
 
 
-def compute_price_features(hist: pd.DataFrame) -> dict[str, float | int]:
+def compute_price_features(hist: pd.DataFrame, *, as_of: date | None = None) -> dict[str, float | int]:
     if hist.empty:
         raise ValueError("history must not be empty")
     frame = hist.sort_values("日期").copy()
@@ -83,9 +83,10 @@ def compute_price_features(hist: pd.DataFrame) -> dict[str, float | int]:
 
     suspension_days_63 = int((volume.tail(63).fillna(0) <= 0).sum())
     first_date = pd.to_datetime(frame["日期"].iloc[0], errors="coerce")
+    as_of_ts = pd.Timestamp(as_of or datetime.now(timezone.utc).date()).normalize()
     list_days = 2000
     if pd.notna(first_date):
-        list_days = max(int((pd.Timestamp(datetime.now(timezone.utc).date()) - first_date.normalize()).days), 1)
+        list_days = max(int((as_of_ts - first_date.normalize()).days), 1)
 
     return {
         "close_cny": latest_close,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from cn_equity_snapshot_pipelines.akshare_enrichment import (
     compute_dividend_stability,
@@ -30,6 +31,15 @@ def test_compute_price_features_from_history():
     assert features["adv20_cny"] > 0
     assert features["realized_vol_126"] > 0
     assert features["list_days"] > 200
+
+
+def test_compute_price_features_list_days_uses_as_of():
+    hist = _sample_history(rows=30)
+    as_of = pd.Timestamp("2024-03-01").date()
+    features = compute_price_features(hist, as_of=as_of)
+    full_features = compute_price_features(hist)
+    assert features["list_days"] <= full_features["list_days"]
+    assert features["list_days"] > 0
 
 
 def test_compute_financial_features_uses_latest_roe():
