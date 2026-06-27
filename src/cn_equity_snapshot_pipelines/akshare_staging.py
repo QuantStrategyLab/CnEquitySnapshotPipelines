@@ -7,6 +7,11 @@ from typing import Callable
 
 import pandas as pd
 
+from .akshare_metadata import (
+    build_symbol_sector_map,
+    lookup_sector,
+    select_dividend_universe_symbols,
+)
 from .akshare_enrichment import (
     FACTOR_SNAPSHOT_COLUMNS,
     FHPS_CANDIDATE_DATES,
@@ -83,15 +88,32 @@ def _fetch_dividends(ak, symbol: str) -> pd.DataFrame:
     return ak.stock_history_dividend_detail(symbol=normalize_symbol(symbol), indicator="分红")
 
 
-def _fetch_sector(ak, symbol: str) -> str:
-    try:
-        profile = ak.stock_profile_cninfo(symbol=normalize_symbol(symbol))
-        if not profile.empty and "所属行业" in profile.columns:
-            sector = str(profile.iloc[0]["所属行业"]).strip()
-            return sector or "unknown"
-    except Exception:
-        return "unknown"
+def _fetch_sector(ak, symbol: str, *, sector_map: dict[str, str] | None = None) -> str:
+    if sector_map:
+        sector = lookup_sector(symbol, sector_map)
+        if sector != "unknown":
+            return sector
     return "unknown"
+
+
+def resolve_universe_symbols(
+    ak,
+    fhps_table: pd.DataFrame,
+    *,
+    mode: str = "staging",
+    custom_symbols: tuple[str, ...] | None = None,
+    expanded_top_n: int = 40,
+) -> tuple[str, ...]:
+    if custom_symbols:
+        return tuple(dict.fromkeys(normalize_symbol(item) for item in custom_symbols if normalize_symbol(item)))
+    if mode == "expanded":
+        selected = select_dividend_universe_symbols(
+            fhps_table,
+            top_n=int(expanded_top_n),
+        )
+        if selected:
+            return selected
+    return DEFAULT_STAGING_SYMBOLS
 
 
 def build_factor_row_from_akshare(
@@ -99,6 +121,7 @@ def build_factor_row_from_akshare(
     *,
     ak=None,
     fhps_table: pd.DataFrame | None = None,
+    sector_map: dict[str, str] | None = None,
     fetch_history: Callable[[str], pd.DataFrame] | None = None,
     fetch_financials: Callable[[str], pd.DataFrame] | None = None,
     fetch_dividends: Callable[[str], pd.DataFrame] | None = None,
@@ -116,7 +139,7 @@ def build_factor_row_from_akshare(
     history_loader = fetch_history or (lambda item: _fetch_history(ak_module, item))
     financial_loader = fetch_financials or (lambda item: _fetch_financials(ak_module, item))
     dividend_loader = fetch_dividends or (lambda item: _fetch_dividends(ak_module, item))
-    sector_loader = fetch_sector or (lambda item: _fetch_sector(ak_module, item))
+    sector_loader = fetch_sector or (lambda item: _fetch_sector(ak_module, item, sector_map=sector_map))
 
     normalized = normalize_symbol(symbol)
     price = compute_price_features(history_loader(normalized))
@@ -146,15 +169,29 @@ def build_factor_snapshot_from_akshare(
     sample_fallback_path: str | Path | None = None,
     min_rows: int = 4,
     as_of: str | None = None,
+    universe_mode: str = "custom",
+    expanded_top_n: int = 40,
+    sector_map: dict[str, str] | None = None,
+    refresh_sector_map: bool = False,
 ) -> tuple[pd.DataFrame, dict[str, object]]:
     diagnostics: dict[str, object] = {
         "source": "akshare",
         "requested_symbols": list(symbols),
+        "universe_mode": universe_mode,
         "symbol_errors": {},
     }
     try:
         ak = _import_akshare()
         fhps_table = _fetch_fhps_table(ak)
+        if universe_mode in {"staging", "expanded"}:
+            symbols = resolve_universe_symbols(
+                ak,
+                fhps_table,
+                mode=universe_mode,
+                expanded_top_n=expanded_top_n,
+            )
+        if sector_map is None:
+            sector_map = build_symbol_sector_map(ak, force_refresh=refresh_sector_map)
     except Exception as exc:
         diagnostics["source"] = "sample_fallback"
         diagnostics["akshare_error"] = str(exc)
@@ -172,6 +209,7 @@ def build_factor_snapshot_from_akshare(
                     symbol,
                     ak=ak,
                     fhps_table=fhps_table,
+                    sector_map=sector_map,
                 )
             )
         except Exception as exc:
@@ -189,6 +227,7 @@ def build_factor_snapshot_from_akshare(
     frame = stamp_as_of(pd.DataFrame(rows, columns=list(FACTOR_SNAPSHOT_COLUMNS)), as_of=as_of)
     diagnostics["row_count"] = len(frame)
     diagnostics["fhps_rows"] = int(len(fhps_table))
+    diagnostics["sector_map_size"] = int(len(sector_map or {}))
     return frame, diagnostics
 
 
@@ -198,11 +237,19 @@ def write_staging_factor_snapshot(
     symbols: tuple[str, ...] = DEFAULT_STAGING_SYMBOLS,
     sample_fallback_path: str | Path | None = None,
     as_of: str | None = None,
+    universe_mode: str = "custom",
+    expanded_top_n: int = 40,
+    sector_map: dict[str, str] | None = None,
+    refresh_sector_map: bool = False,
 ) -> dict[str, object]:
     frame, diagnostics = build_factor_snapshot_from_akshare(
         symbols=symbols,
         sample_fallback_path=sample_fallback_path,
         as_of=as_of,
+        universe_mode=universe_mode,
+        expanded_top_n=expanded_top_n,
+        sector_map=sector_map,
+        refresh_sector_map=refresh_sector_map,
     )
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -215,6 +262,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Stage cn_dividend_quality_snapshot factor CSV via AkShare.")
     parser.add_argument("--output", default="data/staging/dividend_quality/factor_snapshot.latest.csv")
     parser.add_argument("--symbols", default=",".join(DEFAULT_STAGING_SYMBOLS))
+    parser.add_argument(
+        "--universe-mode",
+        choices=("custom", "staging", "expanded"),
+        default="custom",
+        help="custom=use --symbols; staging=8-symbol default; expanded=fhps top dividend yield pool",
+    )
+    parser.add_argument("--expanded-top-n", type=int, default=40)
+    parser.add_argument("--refresh-sector-map", action="store_true")
     parser.add_argument("--as-of", default=None, help="Optional as_of date (YYYY-MM-DD). Defaults to UTC today.")
     parser.add_argument(
         "--sample-fallback",
@@ -227,6 +282,9 @@ def main(argv: list[str] | None = None) -> int:
         symbols=symbols,
         sample_fallback_path=args.sample_fallback,
         as_of=args.as_of,
+        universe_mode=args.universe_mode,
+        expanded_top_n=args.expanded_top_n,
+        refresh_sector_map=args.refresh_sector_map,
     )
     print(diagnostics)
     return 0
