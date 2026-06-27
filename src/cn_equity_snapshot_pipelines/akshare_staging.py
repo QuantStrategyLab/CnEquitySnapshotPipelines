@@ -104,7 +104,15 @@ def build_factor_row_from_akshare(
     fetch_dividends: Callable[[str], pd.DataFrame] | None = None,
     fetch_sector: Callable[[str], str] | None = None,
 ) -> dict[str, object]:
-    ak_module = ak or _import_akshare()
+    needs_akshare = any(
+        item is None
+        for item in (fetch_history, fetch_financials, fetch_dividends, fetch_sector, fhps_table)
+    )
+    ak_module = ak
+    if needs_akshare and ak_module is None:
+        ak_module = _import_akshare()
+    if fhps_table is None and ak_module is not None:
+        fhps_table = _fetch_fhps_table(ak_module)
     history_loader = fetch_history or (lambda item: _fetch_history(ak_module, item))
     financial_loader = fetch_financials or (lambda item: _fetch_financials(ak_module, item))
     dividend_loader = fetch_dividends or (lambda item: _fetch_dividends(ak_module, item))
