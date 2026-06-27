@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cn-equity-snapshot-pipelines"
+version = "0.1.0"
+description = "Feature-snapshot pipelines and scaffold helpers for A-share equity strategies"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "pandas>=2.0",
+  "cn-equity-strategies @ git+https://github.com/QuantStrategyLab/CnEquityStrategies.git@a911cf05c58d1fd14c48a41a0295e50e03638ec2",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+public-data = ["akshare>=1.14"]
+
+[project.scripts]
+cneq-build-dividend-quality-snapshot = "cn_equity_snapshot_pipelines.dividend_quality:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
