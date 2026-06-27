@@ -3,27 +3,20 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 import pandas as pd
 
-FACTOR_SNAPSHOT_COLUMNS = (
-    "symbol",
-    "sector",
-    "close_cny",
-    "adv20_cny",
-    "market_cap_cny",
-    "dividend_yield_ttm",
-    "dividend_stability_3y",
-    "earnings_positive",
-    "payout_ratio",
-    "roe_ttm",
-    "roe_stability_3y",
-    "realized_vol_126",
-    "mom_12_1",
-    "sma200_gap",
-    "suspension_days_63",
-    "is_st",
-    "list_days",
+from .akshare_enrichment import (
+    FACTOR_SNAPSHOT_COLUMNS,
+    FHPS_CANDIDATE_DATES,
+    compute_dividend_stability,
+    compute_financial_features,
+    compute_price_features,
+    extract_fhps_features,
+    merge_factor_row,
+    normalize_symbol,
+    stamp_as_of,
 )
 
 DEFAULT_STAGING_SYMBOLS = (
@@ -47,29 +40,96 @@ def _load_sample_fallback(sample_path: Path) -> pd.DataFrame:
     return frame.loc[:, FACTOR_SNAPSHOT_COLUMNS].copy()
 
 
-def _normalize_symbol(value: object) -> str:
-    text = str(value or "").strip().upper()
-    if text.endswith(".SH") or text.endswith(".SZ"):
-        text = text.split(".", 1)[0]
-    return text.zfill(6) if text.isdigit() else text
-
-
-def _fetch_spot_rows() -> pd.DataFrame:
+def _import_akshare():
     import akshare as ak
 
-    spot = ak.stock_zh_a_spot_em()
-    spot = spot.rename(
-        columns={
-            "代码": "symbol",
-            "名称": "name",
-            "最新价": "close_cny",
-            "成交额": "turnover_cny",
-            "总市值": "market_cap_cny",
-            "市盈率-动态": "pe_ttm",
-        }
+    return ak
+
+
+def _fetch_fhps_table(ak) -> pd.DataFrame:
+    last_error: Exception | None = None
+    for report_date in FHPS_CANDIDATE_DATES:
+        try:
+            frame = ak.stock_fhps_em(date=report_date)
+            if frame is not None and not frame.empty:
+                frame = frame.copy()
+                frame["symbol"] = frame["代码"].map(normalize_symbol)
+                return frame
+        except Exception as exc:
+            last_error = exc
+            continue
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("stock_fhps_em returned no data for candidate report dates")
+
+
+def _fetch_history(ak, symbol: str) -> pd.DataFrame:
+    end_date = datetime.now(timezone.utc).strftime("%Y%m%d")
+    return ak.stock_zh_a_hist(
+        symbol=normalize_symbol(symbol),
+        period="daily",
+        start_date="20180101",
+        end_date=end_date,
+        adjust="qfq",
     )
-    spot["symbol"] = spot["symbol"].map(_normalize_symbol)
-    return spot
+
+
+def _fetch_financials(ak, symbol: str) -> pd.DataFrame:
+    start_year = str(datetime.now(timezone.utc).year - 4)
+    return ak.stock_financial_analysis_indicator(symbol=normalize_symbol(symbol), start_year=start_year)
+
+
+def _fetch_dividends(ak, symbol: str) -> pd.DataFrame:
+    return ak.stock_history_dividend_detail(symbol=normalize_symbol(symbol), indicator="分红")
+
+
+def _fetch_sector(ak, symbol: str) -> str:
+    try:
+        profile = ak.stock_profile_cninfo(symbol=normalize_symbol(symbol))
+        if not profile.empty and "所属行业" in profile.columns:
+            sector = str(profile.iloc[0]["所属行业"]).strip()
+            return sector or "unknown"
+    except Exception:
+        return "unknown"
+    return "unknown"
+
+
+def build_factor_row_from_akshare(
+    symbol: str,
+    *,
+    ak=None,
+    fhps_table: pd.DataFrame | None = None,
+    fetch_history: Callable[[str], pd.DataFrame] | None = None,
+    fetch_financials: Callable[[str], pd.DataFrame] | None = None,
+    fetch_dividends: Callable[[str], pd.DataFrame] | None = None,
+    fetch_sector: Callable[[str], str] | None = None,
+) -> dict[str, object]:
+    ak_module = ak or _import_akshare()
+    history_loader = fetch_history or (lambda item: _fetch_history(ak_module, item))
+    financial_loader = fetch_financials or (lambda item: _fetch_financials(ak_module, item))
+    dividend_loader = fetch_dividends or (lambda item: _fetch_dividends(ak_module, item))
+    sector_loader = fetch_sector or (lambda item: _fetch_sector(ak_module, item))
+
+    normalized = normalize_symbol(symbol)
+    price = compute_price_features(history_loader(normalized))
+    financials = compute_financial_features(financial_loader(normalized))
+    dividend_stability_3y = compute_dividend_stability(dividend_loader(normalized))
+
+    fhps_features = None
+    if fhps_table is not None and not fhps_table.empty:
+        matched = fhps_table.loc[fhps_table["symbol"] == normalized]
+        if not matched.empty:
+            fhps_features = extract_fhps_features(matched.iloc[0], close_cny=float(price["close_cny"]))
+
+    sector = sector_loader(normalized)
+    return merge_factor_row(
+        symbol=normalized,
+        price=price,
+        fhps=fhps_features,
+        financials=financials,
+        dividend_stability_3y=dividend_stability_3y,
+        sector=sector,
+    )
 
 
 def build_factor_snapshot_from_akshare(
@@ -77,61 +137,50 @@ def build_factor_snapshot_from_akshare(
     symbols: tuple[str, ...] = DEFAULT_STAGING_SYMBOLS,
     sample_fallback_path: str | Path | None = None,
     min_rows: int = 4,
+    as_of: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, object]]:
-    diagnostics: dict[str, object] = {"source": "akshare", "requested_symbols": list(symbols)}
+    diagnostics: dict[str, object] = {
+        "source": "akshare",
+        "requested_symbols": list(symbols),
+        "symbol_errors": {},
+    }
     try:
-        spot = _fetch_spot_rows()
+        ak = _import_akshare()
+        fhps_table = _fetch_fhps_table(ak)
     except Exception as exc:
         diagnostics["source"] = "sample_fallback"
         diagnostics["akshare_error"] = str(exc)
         if sample_fallback_path is None:
             raise
-        frame = _load_sample_fallback(Path(sample_fallback_path))
-        diagnostics["row_count"] = len(frame)
-        return frame, diagnostics
-
-    normalized_symbols = {_normalize_symbol(symbol) for symbol in symbols}
-    filtered = spot.loc[spot["symbol"].isin(normalized_symbols)].copy()
-    if len(filtered) < min_rows:
-        diagnostics["source"] = "sample_fallback"
-        diagnostics["akshare_error"] = f"only {len(filtered)} rows matched requested symbols"
-        if sample_fallback_path is None:
-            raise ValueError(diagnostics["akshare_error"])
-        frame = _load_sample_fallback(Path(sample_fallback_path))
+        frame = stamp_as_of(_load_sample_fallback(Path(sample_fallback_path)), as_of=as_of)
         diagnostics["row_count"] = len(frame)
         return frame, diagnostics
 
     rows: list[dict[str, object]] = []
-    for _, item in filtered.iterrows():
-        close_cny = float(item.get("close_cny") or 0.0)
-        turnover_cny = float(item.get("turnover_cny") or 0.0)
-        market_cap_cny = float(item.get("market_cap_cny") or 0.0)
-        rows.append(
-            {
-                "symbol": item["symbol"],
-                "sector": "unknown",
-                "close_cny": close_cny,
-                "adv20_cny": max(turnover_cny, 1.0),
-                "market_cap_cny": market_cap_cny,
-                "dividend_yield_ttm": 0.04,
-                "dividend_stability_3y": 0.70,
-                "earnings_positive": True,
-                "payout_ratio": 0.40,
-                "roe_ttm": 0.12,
-                "roe_stability_3y": 0.65,
-                "realized_vol_126": 0.18,
-                "mom_12_1": 0.05,
-                "sma200_gap": 0.02,
-                "suspension_days_63": 0,
-                "is_st": False,
-                "list_days": 2000,
-            }
-        )
-    frame = pd.DataFrame(rows, columns=list(FACTOR_SNAPSHOT_COLUMNS))
-    if "as_of" not in frame.columns and "snapshot_date" not in frame.columns:
-        stamp = datetime.now(timezone.utc).date().isoformat()
-        frame.insert(0, "as_of", stamp)
+    for symbol in symbols:
+        try:
+            rows.append(
+                build_factor_row_from_akshare(
+                    symbol,
+                    ak=ak,
+                    fhps_table=fhps_table,
+                )
+            )
+        except Exception as exc:
+            diagnostics["symbol_errors"][normalize_symbol(symbol)] = str(exc)
+
+    if len(rows) < min_rows:
+        diagnostics["source"] = "sample_fallback"
+        diagnostics["akshare_error"] = f"only {len(rows)} symbols enriched successfully"
+        if sample_fallback_path is None:
+            raise ValueError(diagnostics["akshare_error"])
+        frame = stamp_as_of(_load_sample_fallback(Path(sample_fallback_path)), as_of=as_of)
+        diagnostics["row_count"] = len(frame)
+        return frame, diagnostics
+
+    frame = stamp_as_of(pd.DataFrame(rows, columns=list(FACTOR_SNAPSHOT_COLUMNS)), as_of=as_of)
     diagnostics["row_count"] = len(frame)
+    diagnostics["fhps_rows"] = int(len(fhps_table))
     return frame, diagnostics
 
 
@@ -140,10 +189,12 @@ def write_staging_factor_snapshot(
     output_path: str | Path,
     symbols: tuple[str, ...] = DEFAULT_STAGING_SYMBOLS,
     sample_fallback_path: str | Path | None = None,
+    as_of: str | None = None,
 ) -> dict[str, object]:
     frame, diagnostics = build_factor_snapshot_from_akshare(
         symbols=symbols,
         sample_fallback_path=sample_fallback_path,
+        as_of=as_of,
     )
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -156,6 +207,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Stage cn_dividend_quality_snapshot factor CSV via AkShare.")
     parser.add_argument("--output", default="data/staging/dividend_quality/factor_snapshot.latest.csv")
     parser.add_argument("--symbols", default=",".join(DEFAULT_STAGING_SYMBOLS))
+    parser.add_argument("--as-of", default=None, help="Optional as_of date (YYYY-MM-DD). Defaults to UTC today.")
     parser.add_argument(
         "--sample-fallback",
         default=str(Path(__file__).resolve().parents[2] / "examples" / "dividend_quality" / "factor_snapshot.sample.csv"),
@@ -166,6 +218,7 @@ def main(argv: list[str] | None = None) -> int:
         output_path=args.output,
         symbols=symbols,
         sample_fallback_path=args.sample_fallback,
+        as_of=args.as_of,
     )
     print(diagnostics)
     return 0

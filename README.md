@@ -29,6 +29,13 @@ Build a sample artifact pack locally:
 PYTHONPATH=src python scripts/build_dividend_quality_sample.py
 ```
 
+Stage real factor inputs via AkShare (falls back to sample CSV on failure):
+
+```bash
+cneq-stage-akshare-dividend-quality --output data/staging/dividend_quality/factor_snapshot.latest.csv
+cneq-stage-akshare-market-history --output data/staging/market_history/etf_universe.latest.csv
+```
+
 Or use the installed entrypoint:
 
 ```bash
