@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -15,16 +16,26 @@ def _read_csv(path: str | Path) -> pd.DataFrame:
     return pd.read_csv(Path(path))
 
 
+def _ensure_snapshot_as_of(snapshot: pd.DataFrame, *, as_of: str | date | None = None) -> pd.DataFrame:
+    frame = snapshot.copy()
+    if "as_of" in frame.columns or "snapshot_date" in frame.columns:
+        return frame
+    stamp = as_of or datetime.now(timezone.utc).date().isoformat()
+    frame.insert(0, "as_of", str(stamp))
+    return frame
+
+
 def build_and_write_snapshot(
     *,
     factor_snapshot_path: str | Path,
     output_dir: str | Path,
     min_adv20_cny: float = 0.0,
     min_market_cap_cny: float = 0.0,
+    as_of: str | date | None = None,
 ) -> SnapshotBuildResult:
     contract = get_profile_contract(CN_DIVIDEND_QUALITY_SNAPSHOT_PROFILE)
     artifact_paths = contract.artifact_paths(output_dir)
-    snapshot = _read_csv(factor_snapshot_path)
+    snapshot = _ensure_snapshot_as_of(_read_csv(factor_snapshot_path), as_of=as_of)
     ranking = score_candidates(
         snapshot,
         min_adv20_cny=float(min_adv20_cny),
@@ -74,6 +85,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-dir", default="data/output/dividend_quality")
     parser.add_argument("--min-adv20-cny", type=float, default=0.0)
     parser.add_argument("--min-market-cap-cny", type=float, default=0.0)
+    parser.add_argument("--as-of", default=None, help="Snapshot as_of date (YYYY-MM-DD). Defaults to UTC today.")
     args = parser.parse_args(argv)
 
     result = build_and_write_snapshot(
@@ -81,6 +93,7 @@ def main(argv: list[str] | None = None) -> int:
         output_dir=args.output_dir,
         min_adv20_cny=args.min_adv20_cny,
         min_market_cap_cny=args.min_market_cap_cny,
+        as_of=args.as_of,
     )
     print(f"snapshot={result.artifact_paths['snapshot']}")
     print(f"manifest={result.artifact_paths['manifest']}")
