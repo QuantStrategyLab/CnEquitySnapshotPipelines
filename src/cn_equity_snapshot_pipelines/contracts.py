@@ -6,6 +6,13 @@ from pathlib import Path
 SOURCE_PROJECT = "CnEquitySnapshotPipelines"
 CN_DIVIDEND_QUALITY_SNAPSHOT_PROFILE = "cn_dividend_quality_snapshot"
 
+# Index metadata shared by contracts and index_membership.
+INDEX_METADATA: dict[str, dict[str, str]] = {
+    "000300": {"name": "CSI300", "display": "沪深300"},
+    "000905": {"name": "CSI500", "display": "中证500"},
+    "000852": {"name": "CSI1000", "display": "中证1000"},
+}
+
 
 @dataclass(frozen=True)
 class SnapshotProfileContract:
@@ -45,6 +52,25 @@ _PROFILE_CONTRACTS = {
         manifest_required_by_runtime=True,
     ),
 }
+
+# Index membership timeline profiles (data-pipeline contracts, not runtime strategies).
+_INDEX_MEMBERSHIP_PROFILES: dict[str, SnapshotProfileContract] = {
+    f"cn_{meta['name'].lower()}_membership": SnapshotProfileContract(
+        profile=f"cn_{meta['name'].lower()}_membership",
+        display_name=f"CN {meta['name']} Index Membership Timeline",
+        contract_version=f"cn_{meta['name'].lower()}_membership.timeline.v1",
+        snapshot_filename=f"cn_{meta['name'].lower()}_membership_timeline.csv",
+        manifest_filename=f"cn_{meta['name'].lower()}_membership_timeline.csv.manifest.json",
+        ranking_filename="",
+        release_summary_filename="release_status_summary.json",
+        manifest_required_by_runtime=False,
+    )
+    for code, meta in INDEX_METADATA.items()
+}
+
+# Merge index membership profiles into the lookup (but keep them separate
+# from strategy profiles for manifest/artifact dispatching).
+_PROFILE_CONTRACTS.update(_INDEX_MEMBERSHIP_PROFILES)
 
 _ALIAS_TO_PROFILE = {
     alias: contract.profile
