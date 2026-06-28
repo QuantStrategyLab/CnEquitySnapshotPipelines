@@ -192,6 +192,11 @@ def build_factor_snapshot_from_akshare(
             )
         if sector_map is None:
             sector_map = build_symbol_sector_map(ak, force_refresh=refresh_sector_map)
+            if not sector_map:
+                diagnostics.setdefault("warnings", []).append(
+                    "sector_map is empty — all sectors will be 'unknown'. "
+                    "Run with --refresh-sector-map to prime the cache from akshare."
+                )
     except Exception as exc:
         diagnostics["source"] = "sample_fallback"
         diagnostics["akshare_error"] = str(exc)
@@ -271,9 +276,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expanded-top-n", type=int, default=40)
     parser.add_argument("--refresh-sector-map", action="store_true")
     parser.add_argument("--as-of", default=None, help="Optional as_of date (YYYY-MM-DD). Defaults to UTC today.")
+    # Resolve sample fallback path robustly (works from repo root or installed package)
+    _default_sample = Path(__file__).resolve().parents[2] / "examples" / "dividend_quality" / "factor_snapshot.sample.csv"
+    if not _default_sample.exists():
+        _default_sample = Path(__file__).resolve().parents[4] / "examples" / "dividend_quality" / "factor_snapshot.sample.csv"
     parser.add_argument(
         "--sample-fallback",
-        default=str(Path(__file__).resolve().parents[2] / "examples" / "dividend_quality" / "factor_snapshot.sample.csv"),
+        default=str(_default_sample),
     )
     args = parser.parse_args(argv)
     symbols = tuple(symbol.strip() for symbol in args.symbols.split(",") if symbol.strip())
