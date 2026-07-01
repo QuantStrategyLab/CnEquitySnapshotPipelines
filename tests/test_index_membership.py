@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
+import cn_equity_snapshot_pipelines.index_membership as index_membership
 from cn_equity_snapshot_pipelines.index_membership import (
     TIMELINE_FILENAME_TEMPLATE,
     capture_snapshot,
@@ -11,6 +13,20 @@ from cn_equity_snapshot_pipelines.index_membership import (
     load_membership_timeline,
     normalize_symbol,
 )
+
+
+@pytest.fixture(autouse=True)
+def _stub_index_membership_sources(monkeypatch):
+    monkeypatch.setattr(
+        index_membership,
+        "fetch_current_constituents",
+        lambda index_code: pd.DataFrame({"symbol": ["600519", "000001"]}),
+    )
+    monkeypatch.setattr(
+        index_membership,
+        "fetch_inclusion_dates",
+        lambda index_code: {"600519": "2018-06-01", "000001": "2020-12-01"},
+    )
 
 
 def test_normalize_symbol_variants():
