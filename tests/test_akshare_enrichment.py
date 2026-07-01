@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import pandas as pd
-import pytest
-
 from cn_equity_snapshot_pipelines.akshare_enrichment import (
     compute_dividend_stability,
     compute_financial_features,

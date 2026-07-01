@@ -20,7 +20,22 @@ jobs:
           python-version: "3.11"
       - name: Install package
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
-          python -m pip install -e '.[test]'
+          python -m pip install -e '.[test]' ruff build
+      - name: Verify dependencies
+        run: |
+          set -euo pipefail
+          python -m pip check
+      - name: Run Ruff
+        run: |
+          set -euo pipefail
+          ruff check .
       - name: Run tests
-        run: python -m pytest -q
+        run: |
+          set -euo pipefail
+          python -m pytest -q
+      - name: Build package
+        run: |
+          set -euo pipefail
+          python -m build
