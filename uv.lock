@@ -250,7 +250,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "akshare", marker = "extra == 'public-data'", specifier = ">=1.14" },
-    { name = "cn-equity-strategies", git = "https://github.com/QuantStrategyLab/CnEquityStrategies.git?rev=c6d680d6d2690fe6ff77872355719751c021f9a0" },
+    { name = "cn-equity-strategies", git = "https://github.com/QuantStrategyLab/CnEquityStrategies.git?rev=357dba7e8896a7f488a484d4a3eea33894708ab9" },
     { name = "pandas", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8" },
 ]
@@ -259,7 +259,7 @@ provides-extras = ["test", "public-data"]
 [[package]]
 name = "cn-equity-strategies"
 version = "0.1.0"
-source = { git = "https://github.com/QuantStrategyLab/CnEquityStrategies.git?rev=c6d680d6d2690fe6ff77872355719751c021f9a0#c6d680d6d2690fe6ff77872355719751c021f9a0" }
+source = { git = "https://github.com/QuantStrategyLab/CnEquityStrategies.git?rev=357dba7e8896a7f488a484d4a3eea33894708ab9#357dba7e8896a7f488a484d4a3eea33894708ab9" }
 dependencies = [
     { name = "pandas" },
     { name = "quant-platform-kit" },
