@@ -250,7 +250,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "akshare", marker = "extra == 'public-data'", specifier = ">=1.14" },
-    { name = "cn-equity-strategies", git = "https://github.com/QuantStrategyLab/CnEquityStrategies.git?rev=357dba7e8896a7f488a484d4a3eea33894708ab9" },
+    { name = "cn-equity-strategies", git = "https://github.com/QuantStrategyLab/CnEquityStrategies.git?rev=8dfadcf8a4dc6cc516f27a4013248474603d8ce2" },
     { name = "pandas", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8" },
 ]
@@ -259,7 +259,7 @@ provides-extras = ["test", "public-data"]
 [[package]]
 name = "cn-equity-strategies"
 version = "0.1.0"
-source = { git = "https://github.com/QuantStrategyLab/CnEquityStrategies.git?rev=357dba7e8896a7f488a484d4a3eea33894708ab9#357dba7e8896a7f488a484d4a3eea33894708ab9" }
+source = { git = "https://github.com/QuantStrategyLab/CnEquityStrategies.git?rev=8dfadcf8a4dc6cc516f27a4013248474603d8ce2#8dfadcf8a4dc6cc516f27a4013248474603d8ce2" }
 dependencies = [
     { name = "pandas" },
     { name = "quant-platform-kit" },
@@ -789,7 +789,7 @@ wheels = [
 [[package]]
 name = "quant-platform-kit"
 version = "0.7.40"
-source = { git = "https://github.com/QuantStrategyLab/QuantPlatformKit.git?rev=7032cde4547e7ec59af15df8935d142461a77051#7032cde4547e7ec59af15df8935d142461a77051" }
+source = { git = "https://github.com/QuantStrategyLab/QuantPlatformKit.git?rev=37c81901160c5b31127a27dba1c63944933fb6bf#37c81901160c5b31127a27dba1c63944933fb6bf" }
 
 [[package]]
 name = "requests"
