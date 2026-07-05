@@ -15,6 +15,7 @@
 | Profile | 名称 | 契约 | Builder |
 | --- | --- | --- | --- |
 | `cn_dividend_quality_snapshot` | CN Dividend Quality Snapshot | `cn_dividend_quality_snapshot.factor_snapshot.v1` | `cneq-build-dividend-quality-snapshot` |
+| `cn_chinext_growth_momentum_quality_snapshot` | CN ChiNext Growth Momentum Quality Snapshot | `cn_chinext_growth_momentum_quality_snapshot.factor_snapshot.v1` | `cneq-build-chinext-growth-momentum-quality-snapshot` |
 
 ## 快速开始
 
@@ -27,6 +28,7 @@ python -m pytest -q
 
 ```bash
 PYTHONPATH=src python scripts/build_dividend_quality_sample.py
+PYTHONPATH=src python scripts/build_chinext_growth_momentum_quality_sample.py
 ```
 
 ## 下游使用

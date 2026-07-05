@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "pandas>=2.0",
-  "cn-equity-strategies @ git+https://github.com/QuantStrategyLab/CnEquityStrategies.git@8dfadcf8a4dc6cc516f27a4013248474603d8ce2",
+  "cn-equity-strategies @ git+https://github.com/QuantStrategyLab/CnEquityStrategies.git@1bced052d515373e88620dae48499a4ad44c10f7",
 ]
 
 [project.optional-dependencies]
@@ -19,6 +19,7 @@ public-data = ["akshare>=1.14"]
 
 [project.scripts]
 cneq-build-dividend-quality-snapshot = "cn_equity_snapshot_pipelines.dividend_quality:main"
+cneq-build-chinext-growth-momentum-quality-snapshot = "cn_equity_snapshot_pipelines.chinext_growth_momentum_quality:main"
 cneq-stage-akshare-dividend-quality = "cn_equity_snapshot_pipelines.akshare_staging:main"
 cneq-stage-akshare-market-history = "cn_equity_snapshot_pipelines.akshare_market_history:main"
 

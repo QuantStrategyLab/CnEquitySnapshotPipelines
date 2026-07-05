@@ -15,6 +15,7 @@ This repository produces evidence and artifacts. It does not place broker orders
 | Profile | Display name | Contract | Builder |
 | --- | --- | --- | --- |
 | `cn_dividend_quality_snapshot` | CN Dividend Quality Snapshot | `cn_dividend_quality_snapshot.factor_snapshot.v1` | `cneq-build-dividend-quality-snapshot` |
+| `cn_chinext_growth_momentum_quality_snapshot` | CN ChiNext Growth Momentum Quality Snapshot | `cn_chinext_growth_momentum_quality_snapshot.factor_snapshot.v1` | `cneq-build-chinext-growth-momentum-quality-snapshot` |
 
 ## Quick start
 
@@ -27,6 +28,7 @@ Build a sample artifact pack locally:
 
 ```bash
 PYTHONPATH=src python scripts/build_dividend_quality_sample.py
+PYTHONPATH=src python scripts/build_chinext_growth_momentum_quality_sample.py
 ```
 
 Stage real factor inputs via AkShare (falls back to sample CSV on failure):
@@ -42,6 +44,10 @@ Or use the installed entrypoint:
 cneq-build-dividend-quality-snapshot \
   --factor-snapshot examples/dividend_quality/factor_snapshot.sample.csv \
   --output-dir data/output/dividend_quality
+
+cneq-build-chinext-growth-momentum-quality-snapshot \
+  --factor-snapshot examples/chinext_growth_momentum_quality/factor_snapshot.sample.csv \
+  --output-dir data/output/chinext_growth_momentum_quality
 ```
 
 ## Downstream use

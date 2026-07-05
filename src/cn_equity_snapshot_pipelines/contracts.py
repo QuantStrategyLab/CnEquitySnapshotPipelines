@@ -5,6 +5,7 @@ from pathlib import Path
 
 SOURCE_PROJECT = "CnEquitySnapshotPipelines"
 CN_DIVIDEND_QUALITY_SNAPSHOT_PROFILE = "cn_dividend_quality_snapshot"
+CN_CHINEXT_GROWTH_MOMENTUM_QUALITY_SNAPSHOT_PROFILE = "cn_chinext_growth_momentum_quality_snapshot"
 
 # Index metadata shared by contracts and index_membership.
 INDEX_METADATA: dict[str, dict[str, str]] = {
@@ -50,6 +51,19 @@ _PROFILE_CONTRACTS = {
             "gs://qsl-runtime-logs-shared/strategy-artifacts/cn_equity/cn_dividend_quality_snapshot"
         ),
         manifest_required_by_runtime=True,
+    ),
+    CN_CHINEXT_GROWTH_MOMENTUM_QUALITY_SNAPSHOT_PROFILE: SnapshotProfileContract(
+        profile=CN_CHINEXT_GROWTH_MOMENTUM_QUALITY_SNAPSHOT_PROFILE,
+        display_name="CN ChiNext Growth Momentum Quality Snapshot",
+        contract_version="cn_chinext_growth_momentum_quality_snapshot.factor_snapshot.v1",
+        snapshot_filename="cn_chinext_growth_momentum_quality_snapshot_factor_snapshot_latest.csv",
+        manifest_filename="cn_chinext_growth_momentum_quality_snapshot_factor_snapshot_latest.csv.manifest.json",
+        ranking_filename="cn_chinext_growth_momentum_quality_snapshot_ranking_latest.csv",
+        legacy_aliases=(),
+        neutral_gcs_prefix_hint=(
+            "gs://qsl-runtime-logs-shared/strategy-artifacts/cn_equity/cn_chinext_growth_momentum_quality_snapshot"
+        ),
+        manifest_required_by_runtime=False,
     ),
 }
 
