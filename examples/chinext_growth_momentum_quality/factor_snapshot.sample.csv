@@ -1,0 +1,5 @@
+symbol,sector,close_cny,adv20_cny,market_cap_cny,revenue_yoy,profit_yoy,revenue_acceleration_2q,roe_ttm,roe_stability_3y,gross_margin_stability_3y,mom_12_1,mom_6_1,sma200_gap,realized_vol_126,earnings_positive,suspension_days_63,is_st,list_days
+300001,software,28.0,80000000.0,25000000000.0,0.32,0.28,0.10,0.18,0.75,0.70,0.24,0.16,0.12,0.28,True,0,False,1200
+300002,biotech,44.0,60000000.0,18000000000.0,0.24,0.21,0.06,0.15,0.68,0.66,0.18,0.12,0.08,0.24,True,0,False,900
+300003,new_energy,16.0,55000000.0,14000000000.0,0.04,-0.02,-0.01,0.08,0.50,0.48,0.05,0.03,0.01,0.20,True,0,False,800
+159915,etf,3.5,1000000000.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.12,True,0,False,3000
