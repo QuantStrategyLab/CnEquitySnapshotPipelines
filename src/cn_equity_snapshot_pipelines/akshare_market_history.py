@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -10,6 +11,7 @@ DEFAULT_ETF_SYMBOLS = (
     "510300",
     "510500",
     "159915",
+    "159949",
     "588000",
     "512100",
     "512170",
@@ -19,6 +21,14 @@ DEFAULT_ETF_SYMBOLS = (
     "513100",
     "511880",
     "511260",
+    "159819",
+    "159995",
+    "159994",
+    "159852",
+    "159792",
+    "512800",
+    "512690",
+    "159928",
 )
 
 
@@ -35,18 +45,33 @@ def _import_akshare():
     return ak
 
 
-def fetch_etf_history(symbol: str, *, ak=None, start_date: str = "20200101") -> pd.DataFrame:
+def fetch_etf_history(
+    symbol: str,
+    *,
+    ak=None,
+    start_date: str = "20200101",
+    max_attempts: int = 3,
+    retry_delay_seconds: float = 1.0,
+) -> pd.DataFrame:
     ak_module = ak or _import_akshare()
     end_date = datetime.now(timezone.utc).strftime("%Y%m%d")
-    frame = ak_module.fund_etf_hist_em(
-        symbol=normalize_symbol(symbol),
-        period="daily",
-        start_date=start_date,
-        end_date=end_date,
-        adjust="qfq",
-    )
-    if frame.empty:
-        raise ValueError(f"empty ETF history for {symbol}")
+    attempts = max(int(max_attempts), 1)
+    for attempt in range(1, attempts + 1):
+        try:
+            frame = ak_module.fund_etf_hist_em(
+                symbol=normalize_symbol(symbol),
+                period="daily",
+                start_date=start_date,
+                end_date=end_date,
+                adjust="qfq",
+            )
+            if frame.empty:
+                raise ValueError(f"empty ETF history for {symbol}")
+            break
+        except Exception:
+            if attempt == attempts:
+                raise
+            time.sleep(max(float(retry_delay_seconds), 0.0) * attempt)
     output = pd.DataFrame(
         {
             "date": pd.to_datetime(frame["日期"], errors="coerce").dt.date.astype(str),
@@ -62,15 +87,19 @@ def build_market_history_frame(
     *,
     ak=None,
     start_date: str = "20200101",
+    request_delay_seconds: float = 0.5,
 ) -> pd.DataFrame:
     frames: list[pd.DataFrame] = []
     errors: dict[str, str] = {}
-    for symbol in symbols:
+    requested_symbols = tuple(dict.fromkeys(normalize_symbol(symbol) for symbol in symbols))
+    for index, symbol in enumerate(requested_symbols):
         try:
             frames.append(fetch_etf_history(symbol, ak=ak, start_date=start_date))
         except Exception as exc:
             errors[normalize_symbol(symbol)] = str(exc)
-    if not frames:
+        if index + 1 < len(requested_symbols):
+            time.sleep(max(float(request_delay_seconds), 0.0))
+    if errors:
         missing = ", ".join(sorted(errors))
         raise RuntimeError(f"failed to fetch ETF histories: {missing}")
     history = pd.concat(frames, ignore_index=True)
@@ -92,7 +121,7 @@ def write_market_history_csv(
     return {
         "output_path": str(path),
         "row_count": int(len(frame)),
-        "symbols": [normalize_symbol(symbol) for symbol in symbols],
+        "symbols": sorted(frame["symbol"].unique().tolist()),
         "start_date": start_date,
     }
 
