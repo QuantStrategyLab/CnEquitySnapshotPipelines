@@ -91,7 +91,7 @@ def fetch_tencent_etf_history(
                 response.raise_for_status()
                 payload = response.json()
                 series = payload.get("data", {}).get(tencent_symbol(symbol), {})
-                klines = series.get("qfqday") or series.get("day") or []
+                klines = series.get("qfqday") or []
                 if not klines:
                     raise ValueError(f"empty Tencent ETF history for {symbol}")
                 rows.extend(
@@ -141,15 +141,13 @@ def fetch_yahoo_etf_history(
             series = result[0]
             timestamps = series.get("timestamp") or []
             indicators = series.get("indicators") or {}
-            quotes = (indicators.get("quote") or [{}])[0]
             # Preserve the existing AkShare adjust="qfq" contract: `close` is adjusted, not raw exchange close.
             adjusted = (indicators.get("adjclose") or [{}])[0].get("adjclose") or []
-            closes = quotes.get("close") or []
+            if len(adjusted) != len(timestamps) or any(value is None for value in adjusted):
+                raise ValueError(f"incomplete Yahoo adjusted ETF history for {symbol}")
             rows = []
             for index, raw_timestamp in enumerate(timestamps):
-                close = adjusted[index] if index < len(adjusted) else closes[index] if index < len(closes) else None
-                if close is None:
-                    continue
+                close = adjusted[index]
                 rows.append(
                     {
                         "date": pd.Timestamp.fromtimestamp(int(raw_timestamp), tz="UTC").date().isoformat(),

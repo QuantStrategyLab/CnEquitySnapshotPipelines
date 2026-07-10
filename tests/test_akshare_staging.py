@@ -178,3 +178,47 @@ def test_yahoo_history_preserves_adjusted_close_contract(monkeypatch: pytest.Mon
 
     assert frame.iloc[0]["close"] == 10.0
     assert module.PRICE_BASIS == "adjusted_close"
+
+
+def test_yahoo_history_rejects_incomplete_adjusted_series(monkeypatch: pytest.MonkeyPatch):
+    from cn_equity_snapshot_pipelines import akshare_market_history as module
+
+    class _Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "chart": {
+                    "result": [
+                        {
+                            "timestamp": [1704153600, 1704240000],
+                            "indicators": {
+                                "quote": [{"close": [12.0, 13.0]}],
+                                "adjclose": [{"adjclose": [10.0]}],
+                            },
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=lambda *args, **kwargs: _Response()))
+
+    with pytest.raises(ValueError, match="incomplete Yahoo adjusted ETF history"):
+        module.fetch_yahoo_etf_history("510300", start_date="20240101", max_attempts=1)
+
+
+def test_tencent_history_rejects_raw_only_series(monkeypatch: pytest.MonkeyPatch):
+    from cn_equity_snapshot_pipelines import akshare_market_history as module
+
+    class _Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"data": {"sh510300": {"day": [["2024-01-02", "10", "11"]]}}}
+
+    monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=lambda *args, **kwargs: _Response()))
+
+    with pytest.raises(ValueError, match="empty Tencent ETF history"):
+        module.fetch_tencent_etf_history("510300", start_date="20240101", max_attempts=1)
