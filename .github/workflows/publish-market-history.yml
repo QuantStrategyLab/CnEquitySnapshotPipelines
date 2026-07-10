@@ -44,7 +44,7 @@ jobs:
       - name: Upload market-history artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cn-equity-market-history-${{ github.run_id }}
+          name: cn-equity-market-history-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/cn-market-history/cn_etf_market_history.csv
           if-no-files-found: error
           retention-days: 30
