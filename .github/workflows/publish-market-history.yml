@@ -31,12 +31,13 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip
           python -m pip install --no-deps -e .
-          python -m pip install pandas "akshare>=1.14"
+          python -m pip install pandas "requests>=2.31"
 
       - name: Fetch complete ETF history
         run: |
           set -euo pipefail
           cneq-stage-akshare-market-history \
+            --source yahoo \
             --start-date 20220101 \
             --output "${RUNNER_TEMP}/cn-market-history/cn_etf_market_history.csv"
 

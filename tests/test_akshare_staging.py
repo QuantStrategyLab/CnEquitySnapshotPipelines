@@ -122,3 +122,25 @@ def test_build_market_history_frame_rejects_partial_history(monkeypatch: pytest.
 
     with pytest.raises(RuntimeError, match="510500"):
         build_market_history_frame(("510300", "510500"), ak=object(), request_delay_seconds=0)
+
+
+def test_build_market_history_frame_supports_yahoo_source(monkeypatch: pytest.MonkeyPatch):
+    from cn_equity_snapshot_pipelines import akshare_market_history as module
+
+    monkeypatch.setattr(
+        module,
+        "fetch_yahoo_etf_history",
+        lambda symbol, **kwargs: pd.DataFrame(
+            {"date": ["2024-01-02"], "symbol": [symbol], "close": [10.0]}
+        ),
+    )
+
+    frame = build_market_history_frame(
+        ("510300", "159915"),
+        source="yahoo",
+        request_delay_seconds=0,
+    )
+
+    assert set(frame["symbol"]) == {"510300", "159915"}
+    assert module.yahoo_symbol("510300") == "510300.SS"
+    assert module.yahoo_symbol("159915") == "159915.SZ"
