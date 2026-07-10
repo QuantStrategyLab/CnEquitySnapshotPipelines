@@ -144,3 +144,35 @@ def test_build_market_history_frame_supports_yahoo_source(monkeypatch: pytest.Mo
     assert set(frame["symbol"]) == {"510300", "159915"}
     assert module.yahoo_symbol("510300") == "510300.SS"
     assert module.yahoo_symbol("159915") == "159915.SZ"
+
+
+def test_yahoo_history_preserves_adjusted_close_contract(monkeypatch: pytest.MonkeyPatch):
+    from cn_equity_snapshot_pipelines import akshare_market_history as module
+
+    class _Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "chart": {
+                    "result": [
+                        {
+                            "timestamp": [1704153600],
+                            "indicators": {
+                                "quote": [{"close": [12.0]}],
+                                "adjclose": [{"adjclose": [10.0]}],
+                            },
+                        }
+                    ]
+                }
+            }
+
+    import requests
+
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: _Response())
+
+    frame = module.fetch_yahoo_etf_history("510300", start_date="20240101")
+
+    assert frame.iloc[0]["close"] == 10.0
+    assert module.PRICE_BASIS == "adjusted_close"

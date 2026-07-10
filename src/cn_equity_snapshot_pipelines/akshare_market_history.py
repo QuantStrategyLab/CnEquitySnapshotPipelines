@@ -31,6 +31,7 @@ DEFAULT_ETF_SYMBOLS = (
     "512690",
     "159928",
 )
+PRICE_BASIS = "adjusted_close"
 
 
 def normalize_symbol(value: object) -> str:
@@ -85,6 +86,7 @@ def fetch_yahoo_etf_history(
             timestamps = series.get("timestamp") or []
             indicators = series.get("indicators") or {}
             quotes = (indicators.get("quote") or [{}])[0]
+            # Preserve the existing AkShare adjust="qfq" contract: `close` is adjusted, not raw exchange close.
             adjusted = (indicators.get("adjclose") or [{}])[0].get("adjclose") or []
             closes = quotes.get("close") or []
             rows = []
@@ -197,6 +199,7 @@ def write_market_history_csv(
         "symbols": sorted(frame["symbol"].unique().tolist()),
         "start_date": start_date,
         "source": source,
+        "price_basis": PRICE_BASIS,
     }
 
 
