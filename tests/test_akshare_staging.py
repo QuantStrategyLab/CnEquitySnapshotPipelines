@@ -144,6 +144,8 @@ def test_build_market_history_frame_supports_yahoo_source(monkeypatch: pytest.Mo
     assert set(frame["symbol"]) == {"510300", "159915"}
     assert module.yahoo_symbol("510300") == "510300.SS"
     assert module.yahoo_symbol("159915") == "159915.SZ"
+    assert module.tencent_symbol("510300") == "sh510300"
+    assert module.tencent_symbol("159915") == "sz159915"
 
 
 def test_yahoo_history_preserves_adjusted_close_contract(monkeypatch: pytest.MonkeyPatch):

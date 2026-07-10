@@ -37,7 +37,7 @@ jobs:
         run: |
           set -euo pipefail
           cneq-stage-akshare-market-history \
-            --source yahoo \
+            --source tencent \
             --start-date 20220101 \
             --output "${RUNNER_TEMP}/cn-market-history/cn_etf_market_history.csv"
 
