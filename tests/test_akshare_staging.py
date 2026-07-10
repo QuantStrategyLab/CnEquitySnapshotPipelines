@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -170,9 +172,7 @@ def test_yahoo_history_preserves_adjusted_close_contract(monkeypatch: pytest.Mon
                 }
             }
 
-    import requests
-
-    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: _Response())
+    monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=lambda *args, **kwargs: _Response()))
 
     frame = module.fetch_yahoo_etf_history("510300", start_date="20240101")
 
