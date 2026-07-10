@@ -1,0 +1,49 @@
+name: Publish Market History
+
+on:
+  schedule:
+    - cron: "0 10 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install public-data dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install --no-deps -e .
+          python -m pip install pandas "akshare>=1.14"
+
+      - name: Fetch complete ETF history
+        run: |
+          set -euo pipefail
+          cneq-stage-akshare-market-history \
+            --start-date 20220101 \
+            --output "${RUNNER_TEMP}/cn-market-history/cn_etf_market_history.csv"
+
+      - name: Upload market-history artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cn-equity-market-history-${{ github.run_id }}
+          path: ${{ runner.temp }}/cn-market-history/cn_etf_market_history.csv
+          if-no-files-found: error
+          retention-days: 30

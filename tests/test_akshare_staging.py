@@ -103,8 +103,22 @@ def test_build_market_history_frame_from_mocked_fetchers():
         }
     )
     try:
-        frame = build_market_history_frame(("510300", "510500"), ak=object())
+        frame = build_market_history_frame(("510300", "510500"), ak=object(), request_delay_seconds=0)
         assert set(frame["symbol"]) == {"510300", "510500"}
         assert len(frame) == 6
     finally:
         module.fetch_etf_history = original
+
+
+def test_build_market_history_frame_rejects_partial_history(monkeypatch: pytest.MonkeyPatch):
+    from cn_equity_snapshot_pipelines import akshare_market_history as module
+
+    def _fetch(symbol: str, **kwargs):
+        if symbol == "510500":
+            raise ConnectionError("unavailable")
+        return pd.DataFrame({"date": ["2024-01-02"], "symbol": [symbol], "close": [10.0]})
+
+    monkeypatch.setattr(module, "fetch_etf_history", _fetch)
+
+    with pytest.raises(RuntimeError, match="510500"):
+        build_market_history_frame(("510300", "510500"), ak=object(), request_delay_seconds=0)
