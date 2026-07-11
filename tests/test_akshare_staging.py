@@ -229,6 +229,37 @@ def test_tencent_history_labels_identity_adjustment(monkeypatch: pytest.MonkeyPa
     assert set(frame["price_basis"]) == {"tencent_qfq_identity"}
 
 
+def test_tencent_history_skips_pre_inception_chunks(monkeypatch: pytest.MonkeyPatch):
+    from cn_equity_snapshot_pipelines import akshare_market_history as module
+
+    class _Response:
+        def __init__(self, params: dict[str, str]) -> None:
+            self.params = params
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            if "2020-01-01" in self.params["param"]:
+                return {"data": {"sh510300": {"qfqday": []}}}
+            dates = pd.bdate_range("2022-06-01", "2023-12-29")
+            rows = [[date.date().isoformat(), "10", "11"] for date in dates]
+            return {"data": {"sh510300": {"qfqday": rows}}}
+
+    monkeypatch.setitem(
+        sys.modules,
+        "requests",
+        SimpleNamespace(get=lambda *args, **kwargs: _Response(kwargs["params"])),
+    )
+
+    frame = module.fetch_tencent_etf_history(
+        "510300", start_date="20200101", end_date="20231231", max_attempts=1
+    )
+
+    assert frame["date"].min() == "2022-06-01"
+    assert frame["date"].max() == "2023-12-29"
+
+
 def test_history_coverage_rejects_truncated_series() -> None:
     from cn_equity_snapshot_pipelines import akshare_market_history as module
 

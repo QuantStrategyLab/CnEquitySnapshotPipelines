@@ -114,6 +114,8 @@ def fetch_tencent_etf_history(
                 series = payload.get("data", {}).get(tencent_symbol(symbol), {})
                 klines = series.get("qfqday") or series.get("day") or []
                 if not klines:
+                    if not rows:
+                        break
                     raise ValueError(f"empty Tencent ETF history for {symbol}")
                 basis = "tencent_qfq" if series.get("qfqday") else "tencent_qfq_identity"
                 chunk_frame = pd.DataFrame(
@@ -130,7 +132,11 @@ def fetch_tencent_etf_history(
                 _validate_history_coverage(
                     chunk_frame,
                     symbol=symbol,
-                    start_date=chunk_start,
+                    start_date=(
+                        pd.Timestamp(chunk_frame["date"].min())
+                        if not rows
+                        else chunk_start
+                    ),
                     end_date=chunk_end,
                 )
                 rows.extend(chunk_frame.to_dict("records"))
