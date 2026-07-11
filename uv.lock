@@ -242,6 +242,7 @@ dependencies = [
 [package.optional-dependencies]
 public-data = [
     { name = "akshare" },
+    { name = "requests" },
 ]
 test = [
     { name = "pytest" },
@@ -253,6 +254,7 @@ requires-dist = [
     { name = "cn-equity-strategies", git = "https://github.com/QuantStrategyLab/CnEquityStrategies.git?rev=73844e92a8570a61e5a9dc6c245809d0b27b89bc" },
     { name = "pandas", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8" },
+    { name = "requests", marker = "extra == 'public-data'", specifier = ">=2.31" },
 ]
 provides-extras = ["test", "public-data"]
 

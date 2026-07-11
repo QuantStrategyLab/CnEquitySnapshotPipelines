@@ -7,6 +7,7 @@ def test_publish_market_history_workflow_is_real_and_fail_closed() -> None:
     ).read_text(encoding="utf-8")
 
     assert "cneq-stage-akshare-market-history" in workflow
+    assert "--source tencent" in workflow
     assert "--start-date 20220101" in workflow
     assert "cn_etf_market_history.csv" in workflow
     assert "actions/upload-artifact@v4" in workflow
