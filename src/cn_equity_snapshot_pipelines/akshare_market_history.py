@@ -31,7 +31,9 @@ DEFAULT_ETF_SYMBOLS = (
     "512690",
     "159928",
 )
-PRICE_BASIS = "adjusted_close"
+PRICE_BASIS = "adjusted_close_equivalent"
+MAX_BOUNDARY_GAP_DAYS = 14
+MIN_BUSINESS_DAY_COVERAGE = 0.75
 
 
 def normalize_symbol(value: object) -> str:
@@ -59,17 +61,36 @@ def tencent_symbol(value: object) -> str:
     return f"{prefix}{symbol}"
 
 
+def _validate_history_coverage(
+    frame: pd.DataFrame,
+    *,
+    symbol: str,
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
+) -> None:
+    dates = pd.DatetimeIndex(pd.to_datetime(frame["date"], errors="coerce").dropna().unique()).sort_values()
+    expected = pd.bdate_range(start_date.normalize(), end_date.normalize())
+    if (
+        dates.empty
+        or dates.min() > start_date.normalize() + pd.Timedelta(days=MAX_BOUNDARY_GAP_DAYS)
+        or dates.max() < end_date.normalize() - pd.Timedelta(days=MAX_BOUNDARY_GAP_DAYS)
+        or len(dates) / max(len(expected), 1) < MIN_BUSINESS_DAY_COVERAGE
+    ):
+        raise ValueError(f"incomplete adjusted ETF history coverage for {symbol}")
+
+
 def fetch_tencent_etf_history(
     symbol: str,
     *,
     start_date: str = "20200101",
+    end_date: str | None = None,
     max_attempts: int = 3,
     retry_delay_seconds: float = 1.0,
 ) -> pd.DataFrame:
     import requests
 
     start = pd.Timestamp(start_date)
-    end = pd.Timestamp(datetime.now(timezone.utc).date())
+    end = pd.Timestamp(end_date) if end_date else pd.Timestamp(datetime.now(timezone.utc).date())
     rows: list[dict[str, object]] = []
     for first_year in range(start.year, end.year + 1, 2):
         chunk_start = max(start, pd.Timestamp(first_year, 1, 1))
@@ -91,13 +112,28 @@ def fetch_tencent_etf_history(
                 response.raise_for_status()
                 payload = response.json()
                 series = payload.get("data", {}).get(tencent_symbol(symbol), {})
-                klines = series.get("qfqday") or []
+                klines = series.get("qfqday") or series.get("day") or []
                 if not klines:
                     raise ValueError(f"empty Tencent ETF history for {symbol}")
-                rows.extend(
-                    {"date": item[0], "symbol": normalize_symbol(symbol), "close": float(item[2])}
-                    for item in klines
+                basis = "tencent_qfq" if series.get("qfqday") else "tencent_qfq_identity"
+                chunk_frame = pd.DataFrame(
+                    [
+                        {
+                            "date": item[0],
+                            "symbol": normalize_symbol(symbol),
+                            "close": float(item[2]),
+                            "price_basis": basis,
+                        }
+                        for item in klines
+                    ]
                 )
+                _validate_history_coverage(
+                    chunk_frame,
+                    symbol=symbol,
+                    start_date=chunk_start,
+                    end_date=chunk_end,
+                )
+                rows.extend(chunk_frame.to_dict("records"))
                 break
             except Exception:
                 if attempt == max(int(max_attempts), 1):
@@ -113,13 +149,14 @@ def fetch_yahoo_etf_history(
     symbol: str,
     *,
     start_date: str = "20200101",
+    end_date: str | None = None,
     max_attempts: int = 3,
     retry_delay_seconds: float = 1.0,
 ) -> pd.DataFrame:
     import requests
 
     start = pd.Timestamp(start_date, tz="UTC")
-    end = pd.Timestamp(datetime.now(timezone.utc) + timedelta(days=1))
+    end = pd.Timestamp(end_date, tz="UTC") if end_date else pd.Timestamp(datetime.now(timezone.utc) + timedelta(days=1))
     query = urllib.parse.urlencode(
         {
             "period1": int(start.timestamp()),
@@ -153,11 +190,18 @@ def fetch_yahoo_etf_history(
                         "date": pd.Timestamp.fromtimestamp(int(raw_timestamp), tz="UTC").date().isoformat(),
                         "symbol": normalize_symbol(symbol),
                         "close": float(close),
+                        "price_basis": "yahoo_adjusted_close",
                     }
                 )
             frame = pd.DataFrame(rows)
             if frame.empty:
                 raise ValueError(f"empty Yahoo ETF history for {symbol}")
+            _validate_history_coverage(
+                frame,
+                symbol=symbol,
+                start_date=start.tz_localize(None),
+                end_date=end.tz_localize(None),
+            )
             return frame
         except Exception:
             if attempt == attempts:
@@ -198,9 +242,17 @@ def fetch_etf_history(
             "date": pd.to_datetime(frame["日期"], errors="coerce").dt.date.astype(str),
             "symbol": normalize_symbol(symbol),
             "close": pd.to_numeric(frame["收盘"], errors="coerce"),
+            "price_basis": "akshare_qfq",
         }
     )
     return output.dropna(subset=["date", "close"])
+
+
+def fetch_hybrid_etf_history(symbol: str, *, start_date: str = "20200101") -> pd.DataFrame:
+    try:
+        return fetch_yahoo_etf_history(symbol, start_date=start_date)
+    except Exception:
+        return fetch_tencent_etf_history(symbol, start_date=start_date)
 
 
 def build_market_history_frame(
@@ -216,11 +268,12 @@ def build_market_history_frame(
     requested_symbols = tuple(dict.fromkeys(normalize_symbol(symbol) for symbol in symbols))
     fetchers = {
         "akshare": fetch_etf_history,
+        "hybrid": fetch_hybrid_etf_history,
         "tencent": fetch_tencent_etf_history,
         "yahoo": fetch_yahoo_etf_history,
     }
     if source not in fetchers:
-        raise ValueError("source must be 'akshare', 'tencent', or 'yahoo'")
+        raise ValueError("source must be 'akshare', 'hybrid', 'tencent', or 'yahoo'")
     fetcher = fetchers[source]
     for index, symbol in enumerate(requested_symbols):
         try:
@@ -259,6 +312,7 @@ def write_market_history_csv(
         "start_date": start_date,
         "source": source,
         "price_basis": PRICE_BASIS,
+        "source_price_bases": sorted(frame["price_basis"].unique().tolist()),
     }
 
 
@@ -267,7 +321,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", default="data/staging/market_history/etf_universe.latest.csv")
     parser.add_argument("--symbols", default=",".join(DEFAULT_ETF_SYMBOLS))
     parser.add_argument("--start-date", default="20200101")
-    parser.add_argument("--source", choices=("akshare", "tencent", "yahoo"), default="akshare")
+    parser.add_argument("--source", choices=("akshare", "hybrid", "tencent", "yahoo"), default="akshare")
     args = parser.parse_args(argv)
     symbols = tuple(symbol.strip() for symbol in args.symbols.split(",") if symbol.strip())
     diagnostics = write_market_history_csv(

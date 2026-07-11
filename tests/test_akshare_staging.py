@@ -174,10 +174,10 @@ def test_yahoo_history_preserves_adjusted_close_contract(monkeypatch: pytest.Mon
 
     monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=lambda *args, **kwargs: _Response()))
 
-    frame = module.fetch_yahoo_etf_history("510300", start_date="20240101")
+    frame = module.fetch_yahoo_etf_history("510300", start_date="20240102", end_date="20240102")
 
     assert frame.iloc[0]["close"] == 10.0
-    assert module.PRICE_BASIS == "adjusted_close"
+    assert module.PRICE_BASIS == "adjusted_close_equivalent"
 
 
 def test_yahoo_history_rejects_incomplete_adjusted_series(monkeypatch: pytest.MonkeyPatch):
@@ -205,10 +205,12 @@ def test_yahoo_history_rejects_incomplete_adjusted_series(monkeypatch: pytest.Mo
     monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=lambda *args, **kwargs: _Response()))
 
     with pytest.raises(ValueError, match="incomplete Yahoo adjusted ETF history"):
-        module.fetch_yahoo_etf_history("510300", start_date="20240101", max_attempts=1)
+        module.fetch_yahoo_etf_history(
+            "510300", start_date="20240101", end_date="20240103", max_attempts=1
+        )
 
 
-def test_tencent_history_rejects_raw_only_series(monkeypatch: pytest.MonkeyPatch):
+def test_tencent_history_labels_identity_adjustment(monkeypatch: pytest.MonkeyPatch):
     from cn_equity_snapshot_pipelines import akshare_market_history as module
 
     class _Response:
@@ -220,5 +222,24 @@ def test_tencent_history_rejects_raw_only_series(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=lambda *args, **kwargs: _Response()))
 
-    with pytest.raises(ValueError, match="empty Tencent ETF history"):
-        module.fetch_tencent_etf_history("510300", start_date="20240101", max_attempts=1)
+    frame = module.fetch_tencent_etf_history(
+        "510300", start_date="20240102", end_date="20240102", max_attempts=1
+    )
+
+    assert set(frame["price_basis"]) == {"tencent_qfq_identity"}
+
+
+def test_history_coverage_rejects_truncated_series() -> None:
+    from cn_equity_snapshot_pipelines import akshare_market_history as module
+
+    frame = pd.DataFrame(
+        {"date": pd.bdate_range("2024-06-01", "2024-12-31"), "symbol": "510300", "close": 10.0}
+    )
+
+    with pytest.raises(ValueError, match="incomplete adjusted ETF history coverage"):
+        module._validate_history_coverage(
+            frame,
+            symbol="510300",
+            start_date=pd.Timestamp("2024-01-01"),
+            end_date=pd.Timestamp("2024-12-31"),
+        )
