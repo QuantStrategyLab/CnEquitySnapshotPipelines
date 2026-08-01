@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 dependencies = [
   "pandas>=2.0",
   "cn-equity-strategies @ git+https://github.com/QuantStrategyLab/CnEquityStrategies.git@00fa762466617d0961bb8b03821f56b1b9c2b866",
+  "quant-platform-kit @ git+https://github.com/QuantStrategyLab/QuantPlatformKit.git@8ba8276948ff71a8cc0a810f98b7437a1311c671",
 ]
 
 [project.optional-dependencies]
@@ -22,6 +23,7 @@ cneq-build-dividend-quality-snapshot = "cn_equity_snapshot_pipelines.dividend_qu
 cneq-build-chinext-growth-momentum-quality-snapshot = "cn_equity_snapshot_pipelines.chinext_growth_momentum_quality:main"
 cneq-stage-akshare-dividend-quality = "cn_equity_snapshot_pipelines.akshare_staging:main"
 cneq-stage-akshare-market-history = "cn_equity_snapshot_pipelines.akshare_market_history:main"
+cneq-publish-research-input = "cn_equity_snapshot_pipelines.research_input_publish:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
