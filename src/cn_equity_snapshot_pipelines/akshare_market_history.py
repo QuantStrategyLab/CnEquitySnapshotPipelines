@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass, field
+import json
+import math
+import re
 import time
 import urllib.parse
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -34,6 +39,284 @@ DEFAULT_ETF_SYMBOLS = (
 PRICE_BASIS = "adjusted_close_equivalent"
 MAX_BOUNDARY_GAP_DAYS = 14
 MIN_BUSINESS_DAY_COVERAGE = 0.75
+TENCENT_ENDPOINT = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+_CAPTURE_MARKER = object()
+_CANONICAL_SYMBOL_RE = re.compile(r"^[0-9]{6}$")
+
+
+class ProvenanceCaptureError(ValueError):
+    """Raised when an HTTP response cannot be accepted as a complete capture."""
+
+
+@dataclass(frozen=True)
+class CapturedChunk:
+    symbol: str
+    start_date: str
+    end_date: str
+    received_at: str
+    response_media_type: str
+    raw_bytes: bytes
+    request_identity_bytes: bytes
+    input_kind: str = "provider_http_response"
+    fallback_used: bool = False
+    _capture_marker: object = field(default=None, repr=False, compare=False)
+
+
+@dataclass(frozen=True)
+class CaptureRun:
+    requested_symbols: tuple[str, ...]
+    start_date: str
+    end_date: str
+    chunks: tuple[CapturedChunk, ...]
+
+
+def _canonical_json_bytes(value: object) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+def _iso_date(value: str) -> str:
+    try:
+        return pd.Timestamp(value).date().isoformat()
+    except (TypeError, ValueError):
+        raise ProvenanceCaptureError("invalid capture date") from None
+
+
+def _capture_symbol(value: object) -> str:
+    if not isinstance(value, str) or not _CANONICAL_SYMBOL_RE.fullmatch(value):
+        raise ProvenanceCaptureError("capture symbol must be canonical six-digit identity")
+    return value
+
+
+def expected_tencent_chunks(start_date: str, end_date: str) -> tuple[tuple[str, str], ...]:
+    start = pd.Timestamp(start_date)
+    end = pd.Timestamp(end_date)
+    if start > end:
+        raise ProvenanceCaptureError("capture start date is after end date")
+    chunks: list[tuple[str, str]] = []
+    for first_year in range(start.year, end.year + 1, 2):
+        chunk_start = max(start, pd.Timestamp(first_year, 1, 1))
+        chunk_end = min(end, pd.Timestamp(first_year + 1, 12, 31))
+        chunks.append((chunk_start.date().isoformat(), chunk_end.date().isoformat()))
+    return tuple(chunks)
+
+
+def canonical_tencent_request_identity(
+    *,
+    symbol: str,
+    start_date: str,
+    end_date: str,
+    response_media_type: str,
+) -> bytes:
+    normalized_symbol = _capture_symbol(symbol)
+    params = {
+        "param": (
+            f"{tencent_symbol(normalized_symbol)},day,{start_date},{end_date},2000,qfq"
+        )
+    }
+    return _canonical_json_bytes(
+        {
+            "date_chunk": {"end": end_date, "start": start_date},
+            "endpoint": TENCENT_ENDPOINT,
+            "method": "GET",
+            "query_params": params,
+            "response_media_type": response_media_type,
+            "symbol": normalized_symbol,
+        }
+    )
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ProvenanceCaptureError("duplicate JSON key in captured response")
+        result[key] = value
+    return result
+
+
+def _reject_nonfinite_json(_: str) -> None:
+    raise ProvenanceCaptureError("non-finite JSON value in captured response")
+
+
+def parse_tencent_captured_chunk(chunk: CapturedChunk) -> pd.DataFrame:
+    """Parse and fully validate rows from the exact captured response bytes."""
+    if chunk._capture_marker is not _CAPTURE_MARKER:
+        raise ProvenanceCaptureError("capture was not produced by the HTTP capture surface")
+    if chunk.input_kind != "provider_http_response":
+        raise ProvenanceCaptureError("capture is not a provider HTTP response")
+    if chunk.fallback_used:
+        raise ProvenanceCaptureError("fallback capture is forbidden")
+    if not isinstance(chunk.raw_bytes, bytes) or not chunk.raw_bytes:
+        raise ProvenanceCaptureError("missing raw response bytes")
+    if not isinstance(chunk.response_media_type, str) or not chunk.response_media_type.strip():
+        raise ProvenanceCaptureError("missing observed Content-Type")
+    expected_identity = canonical_tencent_request_identity(
+        symbol=chunk.symbol,
+        start_date=chunk.start_date,
+        end_date=chunk.end_date,
+        response_media_type=chunk.response_media_type,
+    )
+    if chunk.request_identity_bytes != expected_identity:
+        raise ProvenanceCaptureError("canonical request identity mismatch")
+    try:
+        payload = json.loads(
+            chunk.raw_bytes,
+            object_pairs_hook=_reject_duplicate_json_keys,
+            parse_constant=_reject_nonfinite_json,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
+        raise ProvenanceCaptureError("invalid JSON in captured response") from None
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), dict):
+        raise ProvenanceCaptureError("invalid JSON capture shape")
+    provider_symbol = tencent_symbol(chunk.symbol)
+    data = payload["data"]
+    if set(data) != {provider_symbol}:
+        raise ProvenanceCaptureError("wrong symbol in captured response")
+    series = data[provider_symbol]
+    if not isinstance(series, dict):
+        raise ProvenanceCaptureError("invalid JSON capture series")
+    if "qfqday" not in series:
+        if "day" in series:
+            raise ProvenanceCaptureError("fallback price series is forbidden")
+        raise ProvenanceCaptureError("empty captured response chunk")
+    klines = series["qfqday"]
+    if not isinstance(klines, list) or not klines:
+        raise ProvenanceCaptureError("empty captured response chunk")
+    rows: list[dict[str, object]] = []
+    seen_dates: set[str] = set()
+    for item in klines:
+        if not isinstance(item, list) or len(item) < 3:
+            raise ProvenanceCaptureError("truncated captured response row")
+        date_value = _iso_date(str(item[0]))
+        if date_value in seen_dates:
+            raise ProvenanceCaptureError("duplicate date in captured response")
+        seen_dates.add(date_value)
+        try:
+            close = float(item[2])
+        except (TypeError, ValueError):
+            raise ProvenanceCaptureError("invalid close in captured response") from None
+        if not math.isfinite(close) or close <= 0:
+            raise ProvenanceCaptureError("invalid non-finite or non-positive close in captured response")
+        rows.append(
+            {
+                "date": date_value,
+                "symbol": normalize_symbol(chunk.symbol),
+                "close": close,
+                "price_basis": "tencent_qfq",
+            }
+        )
+    frame = pd.DataFrame(rows).sort_values("date").reset_index(drop=True)
+    minimum = str(frame.iloc[0]["date"])
+    maximum = str(frame.iloc[-1]["date"])
+    if minimum < chunk.start_date or maximum > chunk.end_date:
+        raise ProvenanceCaptureError("out-of-range date in captured response")
+    start = pd.Timestamp(chunk.start_date)
+    end = pd.Timestamp(chunk.end_date)
+    start_complete = minimum == chunk.start_date or (
+        start.weekday() >= 5 and 0 <= (pd.Timestamp(minimum) - start).days <= 3
+    )
+    end_complete = maximum == chunk.end_date or (
+        end.weekday() >= 5 and 0 <= (end - pd.Timestamp(maximum)).days <= 3
+    )
+    if not start_complete or not end_complete:
+        raise ProvenanceCaptureError("truncated captured response chunk")
+    _validate_history_coverage(
+        frame,
+        symbol=chunk.symbol,
+        start_date=pd.Timestamp(chunk.start_date),
+        end_date=pd.Timestamp(chunk.end_date),
+    )
+    return frame
+
+
+def capture_tencent_history_run(
+    symbols: tuple[str, ...],
+    *,
+    start_date: str,
+    end_date: str,
+    http_get: Callable[..., object] | None = None,
+    clock: Callable[[], datetime] | None = None,
+    max_attempts: int = 3,
+    retry_delay_seconds: float = 1.0,
+) -> CaptureRun:
+    """Capture exact Tencent response bodies; no fallback or partial success is allowed."""
+    requested_symbols = tuple(_capture_symbol(symbol) for symbol in symbols)
+    if len(requested_symbols) < 2 or len(set(requested_symbols)) != len(requested_symbols):
+        raise ProvenanceCaptureError("requested symbols must be non-empty and unique")
+    chunks = expected_tencent_chunks(start_date, end_date)
+    if http_get is None:
+        import requests
+
+        http_get = requests.get
+    clock = clock or (lambda: datetime.now(timezone.utc))
+    captured: list[CapturedChunk] = []
+    attempts = max(int(max_attempts), 1)
+    for symbol in requested_symbols:
+        for chunk_start, chunk_end in chunks:
+            params = {
+                "param": (
+                    f"{tencent_symbol(symbol)},day,{chunk_start},{chunk_end},2000,qfq"
+                )
+            }
+            response = None
+            for attempt in range(1, attempts + 1):
+                try:
+                    response = http_get(
+                        TENCENT_ENDPOINT,
+                        params=params,
+                        headers={"User-Agent": "Mozilla/5.0"},
+                        timeout=30,
+                    )
+                    response.raise_for_status()
+                    break
+                except Exception as exc:
+                    if attempt == attempts:
+                        raise RuntimeError(f"HTTP capture failed for {symbol} {chunk_start}..{chunk_end}") from exc
+                    time.sleep(max(float(retry_delay_seconds), 0.0) * attempt)
+            if response is None:
+                raise AssertionError("unreachable")
+            raw_bytes = bytes(response.content)
+            media_type = str(response.headers.get("Content-Type", "")).strip()
+            received = clock()
+            if received.tzinfo is None or received.utcoffset() is None:
+                raise ProvenanceCaptureError("capture receipt timestamp must be timezone-aware")
+            received_at = received.isoformat().replace("+00:00", "Z")
+            capture = CapturedChunk(
+                symbol=symbol,
+                start_date=chunk_start,
+                end_date=chunk_end,
+                received_at=received_at,
+                response_media_type=media_type,
+                raw_bytes=raw_bytes,
+                request_identity_bytes=canonical_tencent_request_identity(
+                    symbol=symbol,
+                    start_date=chunk_start,
+                    end_date=chunk_end,
+                    response_media_type=media_type,
+                ),
+                _capture_marker=_CAPTURE_MARKER,
+            )
+            parse_tencent_captured_chunk(capture)
+            captured.append(capture)
+    _validate_exact_session_consensus(captured)
+    return CaptureRun(
+        requested_symbols=requested_symbols,
+        start_date=_iso_date(start_date),
+        end_date=_iso_date(end_date),
+        chunks=tuple(captured),
+    )
+
+
+def _validate_exact_session_consensus(chunks: list[CapturedChunk]) -> None:
+    session_sets: dict[tuple[str, str], list[set[str]]] = {}
+    for chunk in chunks:
+        frame = parse_tencent_captured_chunk(chunk)
+        session_sets.setdefault((chunk.start_date, chunk.end_date), []).append(
+            set(frame["date"].astype(str))
+        )
+    for sets in session_sets.values():
+        if len(sets) < 2 or any(sessions != sets[0] for sessions in sets[1:]):
+            raise ProvenanceCaptureError("exact cross-symbol session coverage cannot be proven")
 
 
 def normalize_symbol(value: object) -> str:
