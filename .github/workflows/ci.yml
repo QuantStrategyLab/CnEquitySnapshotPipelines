@@ -22,7 +22,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          python -m pip install -e '.[test]' ruff build
+          python -m pip install -e '.[test]' ruff==0.15.21 build
       - name: Verify dependencies
         run: |
           set -euo pipefail
