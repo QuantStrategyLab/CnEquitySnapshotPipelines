@@ -10,8 +10,8 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "pandas>=2.0",
-  "cn-equity-strategies @ git+https://github.com/QuantStrategyLab/CnEquityStrategies.git@00fa762466617d0961bb8b03821f56b1b9c2b866",
-  "quant-platform-kit @ git+https://github.com/QuantStrategyLab/QuantPlatformKit.git@8ba8276948ff71a8cc0a810f98b7437a1311c671",
+  "cn-equity-strategies @ git+https://github.com/QuantStrategyLab/CnEquityStrategies.git@5b30fa332075fe582c1c04400a0115541fb767da",
+  "quant-platform-kit @ git+https://github.com/QuantStrategyLab/QuantPlatformKit.git@5d4bbd0e7ef9a1434010e8b6a69905d39ee55f1b",
 ]
 
 [project.optional-dependencies]
