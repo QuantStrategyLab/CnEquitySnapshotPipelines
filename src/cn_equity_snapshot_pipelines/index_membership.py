@@ -9,7 +9,8 @@ Limitation
 akshare returns only current index constituents (with inclusion dates).
 Removed historical members are not available retroactively. This pipeline
 starts NOW and builds the timeline forward. Queries before the first snapshot
-fail closed because current-member data cannot prove historical membership.
+or between captured snapshots fail closed because current-member data cannot
+prove historical membership.
 The timeline and manifest are separate files: writes are best effort rather
 than crash-atomic, and readers fail closed when their hash-bound pair differs.
 
@@ -58,6 +59,7 @@ HISTORICAL_REMOVED_MEMBERS_UNPROVEN = "HISTORICAL_REMOVED_MEMBERS_UNPROVEN"
 NO_PRIOR_SNAPSHOT = "NO_PRIOR_SNAPSHOT"
 AS_OF_BEFORE_COVERAGE_START = "AS_OF_BEFORE_COVERAGE_START"
 AS_OF_AFTER_COVERAGE_END = "AS_OF_AFTER_COVERAGE_END"
+AS_OF_NOT_CAPTURED = "AS_OF_NOT_CAPTURED"
 TIMELINE_NOT_FOUND = "TIMELINE_NOT_FOUND"
 
 
@@ -127,6 +129,17 @@ def _validate_timeline(frame: pd.DataFrame, index_code: str) -> None:
             previous_removed = removed
 
 
+def _timeline_observed_dates(timeline: pd.DataFrame) -> list[str]:
+    return sorted(
+        {
+            value
+            for column in ("first_seen_date", "last_seen_date", "removed_date")
+            for value in timeline[column].dropna().astype(str)
+            if value
+        }
+    )
+
+
 def _read_manifest(
     timeline_path: Path,
     index_code: str,
@@ -171,6 +184,22 @@ def _read_manifest(
             for value in timeline[column].dropna().astype(str)
         )
         captured_through = coverage_end
+    if "captured_dates" not in manifest:
+        captured_dates = _timeline_observed_dates(timeline)
+    else:
+        raw_captured_dates = manifest["captured_dates"]
+        if not isinstance(raw_captured_dates, list):
+            raise ValueError(f"invalid index membership manifest for {index_code}")
+        try:
+            captured_dates = [
+                _parse_iso_date(value, "manifest captured_dates")
+                for value in raw_captured_dates
+            ]
+        except ValueError as exc:
+            raise ValueError(f"invalid index membership manifest for {index_code}") from exc
+        if any(value is None for value in captured_dates):
+            raise ValueError(f"invalid index membership manifest for {index_code}")
+        captured_dates = [value for value in captured_dates if value is not None]
     changes = manifest["changes"]
     removed = manifest["removed"]
     if not isinstance(changes, list) or not isinstance(removed, list):
@@ -204,6 +233,10 @@ def _read_manifest(
         or manifest["coverage_start"] != coverage_start
         or coverage_end < coverage_start
         or captured_through != coverage_end
+        or captured_dates != sorted(set(captured_dates))
+        or not captured_dates
+        or captured_dates[0] != coverage_start
+        or captured_dates[-1] != coverage_end
         or manifest["historical_removed_members_complete"] is not False
         or manifest["source_as_known_semantics"] != SOURCE_AS_KNOWN_SEMANTICS
         or manifest["timeline_sha256"] != _sha256(timeline_bytes)
@@ -214,6 +247,7 @@ def _read_manifest(
         **manifest,
         "coverage_end": coverage_end,
         "captured_through": captured_through,
+        "captured_dates": captured_dates,
     }
 
 
@@ -224,6 +258,7 @@ def _manifest_bytes(
     coverage_start: str,
     coverage_end: str,
     captured_through: str,
+    captured_dates: list[str],
     comparison_status: str,
     reason_codes: list[str],
     changes: list[str],
@@ -237,6 +272,7 @@ def _manifest_bytes(
                 "coverage_start": coverage_start,
                 "coverage_end": coverage_end,
                 "captured_through": captured_through,
+                "captured_dates": captured_dates,
                 "historical_removed_members_complete": False,
                 "source_as_known_semantics": SOURCE_AS_KNOWN_SEMANTICS,
                 "comparison_status": comparison_status,
@@ -512,6 +548,11 @@ def capture_snapshot(
     )
     coverage_end = as_of
     captured_through = as_of
+    captured_dates = (
+        sorted({*existing_manifest["captured_dates"], as_of})
+        if existing_manifest is not None
+        else [as_of]
+    )
     comparison_status = "comparable" if existing_manifest is not None else "incomparable"
     reason_codes = [HISTORICAL_REMOVED_MEMBERS_UNPROVEN]
     if existing_manifest is None:
@@ -522,6 +563,7 @@ def capture_snapshot(
         coverage_start=coverage_start,
         coverage_end=coverage_end,
         captured_through=captured_through,
+        captured_dates=captured_dates,
         comparison_status=comparison_status,
         reason_codes=reason_codes,
         changes=sorted(row["symbol"] for row in new_rows) if existing_manifest is not None else [],
@@ -600,6 +642,13 @@ def query_constituents_as_of(
         return base_result
     if normalized_as_of > coverage_end:
         base_result["reason_codes"] = [AS_OF_AFTER_COVERAGE_END, *base_result["reason_codes"]]
+        return base_result
+    if normalized_as_of not in manifest["captured_dates"]:
+        base_result["reason_codes"] = [AS_OF_NOT_CAPTURED, *base_result["reason_codes"]]
+        return base_result
+    if normalized_as_of == coverage_start:
+        if NO_PRIOR_SNAPSHOT not in base_result["reason_codes"]:
+            base_result["reason_codes"].append(NO_PRIOR_SNAPSHOT)
         return base_result
     if manifest["comparison_status"] != "comparable":
         return base_result

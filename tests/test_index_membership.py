@@ -64,6 +64,7 @@ def test_first_snapshot_writes_incomplete_forward_accumulation_manifest(tmp_path
     assert manifest["coverage_start"] == "2026-06-28"
     assert manifest["coverage_end"] == "2026-06-28"
     assert manifest["captured_through"] == "2026-06-28"
+    assert manifest["captured_dates"] == ["2026-06-28"]
     assert manifest["historical_removed_members_complete"] is False
     assert manifest["source_as_known_semantics"] == "forward_accumulation_from_first_snapshot"
     assert manifest["comparison_status"] == "incomparable"
@@ -109,11 +110,42 @@ def test_later_snapshot_keeps_forward_accumulation_comparison(tmp_path: Path, mo
     assert manifest["coverage_start"] == "2026-06-28"
     assert manifest["coverage_end"] == "2026-07-01"
     assert manifest["captured_through"] == "2026-07-01"
+    assert manifest["captured_dates"] == ["2026-06-28", "2026-07-01"]
     assert manifest["historical_removed_members_complete"] is False
     assert manifest["comparison_status"] == "comparable"
     assert manifest["reason_codes"] == ["HISTORICAL_REMOVED_MEMBERS_UNPROVEN"]
     assert manifest["changes"] == []
     assert manifest["removed"] == ["000001"]
+
+    first_snapshot_query = query_constituents_as_of("000905", "2026-06-28", snapshot_dir=tmp_path)
+    assert first_snapshot_query["comparison_status"] == "incomparable"
+    assert first_snapshot_query["members"] == []
+    assert first_snapshot_query["reason_codes"] == [
+        "HISTORICAL_REMOVED_MEMBERS_UNPROVEN",
+        "NO_PRIOR_SNAPSHOT",
+    ]
+
+
+def test_query_between_captured_dates_fails_closed_and_inherits_manifest_reasons(
+    tmp_path: Path,
+    monkeypatch,
+):
+    capture_snapshot("000905", snapshot_date="2026-06-28", output_dir=tmp_path)
+    monkeypatch.setattr(
+        index_membership,
+        "fetch_current_constituents",
+        lambda index_code: pd.DataFrame({"symbol": ["600519"]}),
+    )
+    result = capture_snapshot("000905", snapshot_date="2026-07-01", output_dir=tmp_path)
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+
+    query = query_constituents_as_of("000905", "2026-06-30", snapshot_dir=tmp_path)
+
+    assert query["comparison_status"] == "incomparable"
+    assert query["members"] == []
+    assert query["changes"] == []
+    assert query["removed"] == []
+    assert query["reason_codes"] == ["AS_OF_NOT_CAPTURED", *manifest["reason_codes"]]
 
 
 @pytest.mark.parametrize("as_of", ["2026-07-02", "2099-01-01"])
@@ -163,9 +195,33 @@ def test_query_within_coverage_inherits_comparable_manifest_reasons(tmp_path: Pa
     assert query["reason_codes"] == manifest["reason_codes"]
 
 
+def test_legacy_manifest_without_captured_dates_is_conservatively_compatible(
+    tmp_path: Path,
+    monkeypatch,
+):
+    capture_snapshot("000905", snapshot_date="2026-06-28", output_dir=tmp_path)
+    monkeypatch.setattr(
+        index_membership,
+        "fetch_current_constituents",
+        lambda index_code: pd.DataFrame({"symbol": ["600519"]}),
+    )
+    result = capture_snapshot("000905", snapshot_date="2026-07-01", output_dir=tmp_path)
+    manifest_path = Path(result["manifest_path"])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.pop("captured_dates")
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert query_constituents_as_of("000905", "2026-07-01", snapshot_dir=tmp_path)[
+        "comparison_status"
+    ] == "comparable"
+    assert query_constituents_as_of("000905", "2026-06-30", snapshot_dir=tmp_path)[
+        "reason_codes"
+    ] == ["AS_OF_NOT_CAPTURED", "HISTORICAL_REMOVED_MEMBERS_UNPROVEN"]
+
+
 @pytest.mark.parametrize(
     "manifest_contents",
-    [None, "{", "wrong-coverage-start", "hash-mismatch"],
+    [None, "{", "wrong-coverage-start", "hash-mismatch", "null-captured-dates"],
 )
 def test_load_membership_timeline_fails_closed_without_valid_manifest(
     tmp_path: Path,
@@ -176,12 +232,14 @@ def test_load_membership_timeline_fails_closed_without_valid_manifest(
     manifest_path = Path(result["manifest_path"])
     if manifest_contents is None:
         manifest_path.unlink()
-    elif manifest_contents in {"wrong-coverage-start", "hash-mismatch"}:
+    elif manifest_contents in {"wrong-coverage-start", "hash-mismatch", "null-captured-dates"}:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if manifest_contents == "wrong-coverage-start":
             manifest["coverage_start"] = "2020-01-01"
-        else:
+        elif manifest_contents == "hash-mismatch":
             manifest["timeline_sha256"] = "0" * 64
+        else:
+            manifest["captured_dates"] = None
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     else:
         manifest_path.write_text(manifest_contents, encoding="utf-8")
@@ -416,9 +474,9 @@ def test_removed_member_can_be_reincluded_as_a_new_non_overlapping_segment(
             "removed_date": "",
         },
     ]
-    assert "000001" in constituents_as_of("000905", "2026-06-30", snapshot_dir=tmp_path)
+    assert constituents_as_of("000905", "2026-06-30", snapshot_dir=tmp_path) == ()
     assert "000001" not in constituents_as_of("000905", "2026-07-01", snapshot_dir=tmp_path)
-    assert "000001" not in constituents_as_of("000905", "2026-07-31", snapshot_dir=tmp_path)
+    assert constituents_as_of("000905", "2026-07-31", snapshot_dir=tmp_path) == ()
     assert "000001" in constituents_as_of("000905", "2026-08-01", snapshot_dir=tmp_path)
     assert result["new_symbols"] == 0
     assert result["reintroduced_symbols"] == 1
