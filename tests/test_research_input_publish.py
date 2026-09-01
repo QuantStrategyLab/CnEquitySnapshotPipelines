@@ -594,7 +594,7 @@ def test_producer_identity_is_derived_from_clean_trusted_checkout_and_dirty_fail
 
 def test_pyproject_lock_resolve_one_canonical_qpk_pin() -> None:
     root = Path(__file__).resolve().parents[1]
-    expected = "3acab1923a97b805b077c85c6c19657be0143bac"
+    expected = "3b74a445b370745fcb7bc380b4f37e9bf2f7cf56"
     pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
     lock = (root / "uv.lock").read_text(encoding="utf-8")
     assert f"QuantPlatformKit.git@{expected}" in pyproject
