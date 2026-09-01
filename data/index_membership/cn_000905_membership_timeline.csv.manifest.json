@@ -1,0 +1,17 @@
+{
+  "captured_through": "2026-06-28",
+  "changes": [],
+  "comparison_status": "incomparable",
+  "coverage_end": "2026-06-28",
+  "coverage_start": "2026-06-28",
+  "historical_removed_members_complete": false,
+  "index_code": "000905",
+  "manifest_type": "index_membership_timeline",
+  "reason_codes": [
+    "HISTORICAL_REMOVED_MEMBERS_UNPROVEN",
+    "NO_PRIOR_SNAPSHOT"
+  ],
+  "removed": [],
+  "source_as_known_semantics": "forward_accumulation_from_first_snapshot",
+  "timeline_sha256": "1d880b3a8b24878ec73b64904b12af7052aab8049965159644c3a33cf7de4fc8"
+}

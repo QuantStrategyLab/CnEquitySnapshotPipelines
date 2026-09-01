@@ -26,6 +26,8 @@ def test_contract_surface_includes_strategy_and_index_membership():
 
     csi500 = get_profile_contract("cn_csi500_membership")
     assert csi500.contract_version == "cn_csi500_membership.timeline.v1"
+    assert csi500.snapshot_filename == "cn_000905_membership_timeline.csv"
+    assert csi500.manifest_filename == "cn_000905_membership_timeline.csv.manifest.json"
     assert csi500.manifest_required_by_runtime is False
 
     chinext = get_profile_contract("cn-chinext-growth-momentum-quality-snapshot")
