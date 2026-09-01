@@ -10,6 +10,8 @@ akshare returns only current index constituents (with inclusion dates).
 Removed historical members are not available retroactively. This pipeline
 starts NOW and builds the timeline forward. Queries before the first snapshot
 fail closed because current-member data cannot prove historical membership.
+The timeline and manifest are separate files: writes are best effort rather
+than crash-atomic, and readers fail closed when their hash-bound pair differs.
 
 Timeline CSV schema
 -------------------
@@ -55,6 +57,7 @@ SOURCE_AS_KNOWN_SEMANTICS = "forward_accumulation_from_first_snapshot"
 HISTORICAL_REMOVED_MEMBERS_UNPROVEN = "HISTORICAL_REMOVED_MEMBERS_UNPROVEN"
 NO_PRIOR_SNAPSHOT = "NO_PRIOR_SNAPSHOT"
 AS_OF_BEFORE_COVERAGE_START = "AS_OF_BEFORE_COVERAGE_START"
+AS_OF_AFTER_COVERAGE_END = "AS_OF_AFTER_COVERAGE_END"
 TIMELINE_NOT_FOUND = "TIMELINE_NOT_FOUND"
 
 
@@ -153,6 +156,21 @@ def _read_manifest(
         raise ValueError(f"invalid index membership manifest for {index_code}")
     coverage_start = timeline["first_seen_date"].min()
     _parse_iso_date(manifest["coverage_start"], "manifest coverage_start")
+    has_coverage_end = "coverage_end" in manifest
+    has_captured_through = "captured_through" in manifest
+    if has_coverage_end != has_captured_through:
+        raise ValueError(f"invalid index membership manifest for {index_code}")
+    if has_coverage_end:
+        coverage_end = _parse_iso_date(manifest["coverage_end"], "manifest coverage_end")
+        captured_through = _parse_iso_date(manifest["captured_through"], "manifest captured_through")
+        assert coverage_end is not None and captured_through is not None
+    else:
+        coverage_end = max(
+            value
+            for column in ("first_seen_date", "last_seen_date", "removed_date")
+            for value in timeline[column].dropna().astype(str)
+        )
+        captured_through = coverage_end
     changes = manifest["changes"]
     removed = manifest["removed"]
     if not isinstance(changes, list) or not isinstance(removed, list):
@@ -184,13 +202,19 @@ def _read_manifest(
         manifest["manifest_type"] != "index_membership_timeline"
         or manifest["index_code"] != str(index_code)
         or manifest["coverage_start"] != coverage_start
+        or coverage_end < coverage_start
+        or captured_through != coverage_end
         or manifest["historical_removed_members_complete"] is not False
         or manifest["source_as_known_semantics"] != SOURCE_AS_KNOWN_SEMANTICS
         or manifest["timeline_sha256"] != _sha256(timeline_bytes)
         or not valid_comparison
     ):
         raise ValueError(f"invalid index membership manifest for {index_code}")
-    return manifest
+    return {
+        **manifest,
+        "coverage_end": coverage_end,
+        "captured_through": captured_through,
+    }
 
 
 def _manifest_bytes(
@@ -198,6 +222,8 @@ def _manifest_bytes(
     timeline_bytes: bytes,
     index_code: str,
     coverage_start: str,
+    coverage_end: str,
+    captured_through: str,
     comparison_status: str,
     reason_codes: list[str],
     changes: list[str],
@@ -209,6 +235,8 @@ def _manifest_bytes(
                 "manifest_type": "index_membership_timeline",
                 "index_code": index_code,
                 "coverage_start": coverage_start,
+                "coverage_end": coverage_end,
+                "captured_through": captured_through,
                 "historical_removed_members_complete": False,
                 "source_as_known_semantics": SOURCE_AS_KNOWN_SEMANTICS,
                 "comparison_status": comparison_status,
@@ -246,12 +274,18 @@ def _stage_bytes(destination: Path, data: bytes, *, recovery_backup: bool = Fals
     return Path(name)
 
 
-def _commit_timeline_pair(
+def _write_timeline_pair_best_effort(
     timeline_path: Path,
     manifest_path: Path,
     timeline_bytes: bytes,
     manifest_bytes: bytes,
 ) -> None:
+    """Stage and replace the two files with rollback, but not crash atomicity.
+
+    Filesystems cannot atomically replace both independent paths. A process
+    crash between replacements can therefore leave a mismatched pair; readers
+    fail closed because they require both files and validate timeline_sha256.
+    """
     staged_timeline = _stage_bytes(timeline_path, timeline_bytes)
     staged_manifest: Path | None = None
     recovery_backup: Path | None = None
@@ -476,6 +510,8 @@ def capture_snapshot(
     coverage_start = (
         existing_manifest["coverage_start"] if existing_manifest is not None else as_of
     )
+    coverage_end = as_of
+    captured_through = as_of
     comparison_status = "comparable" if existing_manifest is not None else "incomparable"
     reason_codes = [HISTORICAL_REMOVED_MEMBERS_UNPROVEN]
     if existing_manifest is None:
@@ -484,12 +520,14 @@ def capture_snapshot(
         timeline_bytes=timeline_bytes,
         index_code=index_code,
         coverage_start=coverage_start,
+        coverage_end=coverage_end,
+        captured_through=captured_through,
         comparison_status=comparison_status,
         reason_codes=reason_codes,
         changes=sorted(row["symbol"] for row in new_rows) if existing_manifest is not None else [],
         removed=sorted(newly_removed) if existing_manifest is not None else [],
     )
-    _commit_timeline_pair(timeline_path, manifest_path, timeline_bytes, manifest_bytes)
+    _write_timeline_pair_best_effort(timeline_path, manifest_path, timeline_bytes, manifest_bytes)
     new_symbols = {row["symbol"] for row in new_rows} - seen_symbols
     reintroduced_symbols = {row["symbol"] for row in new_rows} & seen_symbols
 
@@ -540,21 +578,30 @@ def query_constituents_as_of(
         Path(snapshot_dir or DEFAULT_SNAPSHOT_DIR),
     )
     coverage_start = manifest["coverage_start"] if manifest is not None else None
+    coverage_end = manifest["coverage_end"] if manifest is not None else None
+    captured_through = manifest["captured_through"] if manifest is not None else None
     base_result: dict[str, Any] = {
         "index_code": index_code,
         "as_of": normalized_as_of,
         "coverage_start": coverage_start,
+        "coverage_end": coverage_end,
+        "captured_through": captured_through,
         "comparison_status": "incomparable",
         "members": [],
         "changes": [],
         "removed": [],
-        "reason_codes": [],
+        "reason_codes": list(manifest["reason_codes"]) if manifest is not None else [],
     }
     if manifest is None:
         base_result["reason_codes"] = [TIMELINE_NOT_FOUND]
         return base_result
     if normalized_as_of < coverage_start:
-        base_result["reason_codes"] = [AS_OF_BEFORE_COVERAGE_START]
+        base_result["reason_codes"] = [AS_OF_BEFORE_COVERAGE_START, *base_result["reason_codes"]]
+        return base_result
+    if normalized_as_of > coverage_end:
+        base_result["reason_codes"] = [AS_OF_AFTER_COVERAGE_END, *base_result["reason_codes"]]
+        return base_result
+    if manifest["comparison_status"] != "comparable":
         return base_result
 
     active = (timeline["first_seen_date"] <= normalized_as_of) & (

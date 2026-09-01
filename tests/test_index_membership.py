@@ -62,6 +62,8 @@ def test_first_snapshot_writes_incomplete_forward_accumulation_manifest(tmp_path
 
     manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
     assert manifest["coverage_start"] == "2026-06-28"
+    assert manifest["coverage_end"] == "2026-06-28"
+    assert manifest["captured_through"] == "2026-06-28"
     assert manifest["historical_removed_members_complete"] is False
     assert manifest["source_as_known_semantics"] == "forward_accumulation_from_first_snapshot"
     assert manifest["comparison_status"] == "incomparable"
@@ -71,6 +73,26 @@ def test_first_snapshot_writes_incomplete_forward_accumulation_manifest(tmp_path
     ]
     assert manifest["changes"] == []
     assert manifest["removed"] == []
+
+
+def test_query_at_first_snapshot_remains_incomparable_and_inherits_manifest_reasons(tmp_path: Path):
+    result = capture_snapshot("000905", snapshot_date="2026-06-28", output_dir=tmp_path)
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+
+    query = query_constituents_as_of("000905", "2026-06-28", snapshot_dir=tmp_path)
+
+    assert query == {
+        "index_code": "000905",
+        "as_of": "2026-06-28",
+        "coverage_start": "2026-06-28",
+        "coverage_end": "2026-06-28",
+        "captured_through": "2026-06-28",
+        "comparison_status": "incomparable",
+        "members": [],
+        "changes": [],
+        "removed": [],
+        "reason_codes": manifest["reason_codes"],
+    }
 
 
 def test_later_snapshot_keeps_forward_accumulation_comparison(tmp_path: Path, monkeypatch):
@@ -85,11 +107,60 @@ def test_later_snapshot_keeps_forward_accumulation_comparison(tmp_path: Path, mo
 
     manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
     assert manifest["coverage_start"] == "2026-06-28"
+    assert manifest["coverage_end"] == "2026-07-01"
+    assert manifest["captured_through"] == "2026-07-01"
     assert manifest["historical_removed_members_complete"] is False
     assert manifest["comparison_status"] == "comparable"
     assert manifest["reason_codes"] == ["HISTORICAL_REMOVED_MEMBERS_UNPROVEN"]
     assert manifest["changes"] == []
     assert manifest["removed"] == ["000001"]
+
+
+@pytest.mark.parametrize("as_of", ["2026-07-02", "2099-01-01"])
+def test_query_after_coverage_end_fails_closed_and_inherits_manifest_reasons(
+    tmp_path: Path,
+    monkeypatch,
+    as_of: str,
+):
+    capture_snapshot("000905", snapshot_date="2026-06-28", output_dir=tmp_path)
+    monkeypatch.setattr(
+        index_membership,
+        "fetch_current_constituents",
+        lambda index_code: pd.DataFrame({"symbol": ["600519"]}),
+    )
+    result = capture_snapshot("000905", snapshot_date="2026-07-01", output_dir=tmp_path)
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+
+    query = query_constituents_as_of("000905", as_of, snapshot_dir=tmp_path)
+
+    assert query == {
+        "index_code": "000905",
+        "as_of": as_of,
+        "coverage_start": "2026-06-28",
+        "coverage_end": "2026-07-01",
+        "captured_through": "2026-07-01",
+        "comparison_status": "incomparable",
+        "members": [],
+        "changes": [],
+        "removed": [],
+        "reason_codes": ["AS_OF_AFTER_COVERAGE_END", *manifest["reason_codes"]],
+    }
+
+
+def test_query_within_coverage_inherits_comparable_manifest_reasons(tmp_path: Path, monkeypatch):
+    capture_snapshot("000905", snapshot_date="2026-06-28", output_dir=tmp_path)
+    monkeypatch.setattr(
+        index_membership,
+        "fetch_current_constituents",
+        lambda index_code: pd.DataFrame({"symbol": ["600519"]}),
+    )
+    result = capture_snapshot("000905", snapshot_date="2026-07-01", output_dir=tmp_path)
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+
+    query = query_constituents_as_of("000905", "2026-07-01", snapshot_dir=tmp_path)
+
+    assert query["comparison_status"] == "comparable"
+    assert query["reason_codes"] == manifest["reason_codes"]
 
 
 @pytest.mark.parametrize(
@@ -185,11 +256,17 @@ def test_query_before_coverage_fails_closed_without_current_member_fallback(
         "index_code": "000905",
         "as_of": "2026-06-14",
         "coverage_start": "2026-06-15",
+        "coverage_end": "2026-06-15",
+        "captured_through": "2026-06-15",
         "comparison_status": "incomparable",
         "members": [],
         "changes": [],
         "removed": [],
-        "reason_codes": ["AS_OF_BEFORE_COVERAGE_START"],
+        "reason_codes": [
+            "AS_OF_BEFORE_COVERAGE_START",
+            "HISTORICAL_REMOVED_MEMBERS_UNPROVEN",
+            "NO_PRIOR_SNAPSHOT",
+        ],
     }
     assert constituents_as_of(
         "000905",
@@ -199,16 +276,28 @@ def test_query_before_coverage_fails_closed_without_current_member_fallback(
     ) == ()
 
 
-def test_constituents_as_of_after_snapshot(tmp_path: Path):
+def test_constituents_as_of_after_comparable_snapshot(tmp_path: Path):
     capture_snapshot("000905", snapshot_date="2026-06-15", output_dir=tmp_path)
+    capture_snapshot("000905", snapshot_date="2026-06-21", output_dir=tmp_path)
     members = constituents_as_of(
         "000905",
-        "2026-06-15",
+        "2026-06-21",
         snapshot_dir=tmp_path,
         fallback_to_inclusion_table=False,
     )
     assert len(members) > 0
     assert all(isinstance(s, str) and len(s) == 6 for s in members)
+
+
+def test_reader_fails_closed_when_timeline_is_replaced_without_its_manifest(tmp_path: Path):
+    result = capture_snapshot("000905", snapshot_date="2026-06-15", output_dir=tmp_path)
+    timeline_path = Path(result["timeline_path"])
+    timeline = pd.read_csv(timeline_path, dtype=str)
+    timeline.loc[:, "last_seen_date"] = "2026-06-21"
+    timeline.to_csv(timeline_path, index=False)
+
+    with pytest.raises(ValueError, match="manifest"):
+        query_constituents_as_of("000905", "2026-06-15", snapshot_dir=tmp_path)
 
 
 def test_detect_removed_members(tmp_path: Path, monkeypatch):
@@ -466,7 +555,7 @@ def test_old_pair_read_failure_cleans_staged_files_without_changing_pair(
     monkeypatch.setattr(Path, "read_bytes", fail_selected_old_artifact)
 
     with pytest.raises(OSError, match=f"old {failed_artifact} read"):
-        index_membership._commit_timeline_pair(
+        index_membership._write_timeline_pair_best_effort(
             timeline_path,
             manifest_path,
             b"new timeline bytes",
