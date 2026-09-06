@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from datetime import date
+
 import pandas as pd
+import pytest
 from cn_equity_snapshot_pipelines.akshare_enrichment import (
     compute_dividend_stability,
     compute_financial_features,
     compute_price_features,
     extract_fhps_features,
     merge_factor_row,
+    stamp_as_of,
 )
 
 
@@ -24,7 +28,7 @@ def _sample_history(rows: int = 280) -> pd.DataFrame:
 
 
 def test_compute_price_features_from_history():
-    features = compute_price_features(_sample_history())
+    features = compute_price_features(_sample_history(), as_of=date(2026, 6, 27))
     assert features["close_cny"] > 100
     assert features["adv20_cny"] > 0
     assert features["realized_vol_126"] > 0
@@ -35,9 +39,39 @@ def test_compute_price_features_list_days_uses_as_of():
     hist = _sample_history(rows=30)
     as_of = pd.Timestamp("2024-03-01").date()
     features = compute_price_features(hist, as_of=as_of)
-    full_features = compute_price_features(hist)
+    full_features = compute_price_features(hist, as_of=date(2026, 6, 27))
     assert features["list_days"] <= full_features["list_days"]
     assert features["list_days"] > 0
+
+
+def test_price_features_ignore_future_bars_without_mutating_history():
+    history = _sample_history()
+    cutoff = history["日期"].iloc[-2].date()
+    expected = compute_price_features(history.iloc[:-1], as_of=cutoff)
+    history.loc[history.index[-1], ["收盘", "成交额", "成交量"]] = [10000, 0, 0]
+    original = history.copy(deep=True)
+
+    assert compute_price_features(history, as_of=cutoff) == expected
+    pd.testing.assert_frame_equal(history, original)
+
+
+@pytest.mark.parametrize("bad_date", ["invalid", None])
+def test_price_features_reject_unknown_bar_dates(bad_date):
+    history = _sample_history(rows=3)
+    history["日期"] = history["日期"].astype(object)
+    history.loc[1, "日期"] = bad_date
+    with pytest.raises(ValueError, match="history dates must be valid"):
+        compute_price_features(history, as_of=date(2024, 1, 4))
+
+
+def test_price_features_reject_empty_cutoff():
+    with pytest.raises(ValueError, match="history has no bars on or before as_of"):
+        compute_price_features(_sample_history(rows=3), as_of=date(2024, 1, 1))
+
+
+def test_stamp_preserves_fixture_date_without_claiming_visibility():
+    frame = pd.DataFrame({"as_of": ["2020-01-02"], "symbol": ["synthetic"]})
+    pd.testing.assert_frame_equal(stamp_as_of(frame, as_of="2026-06-27"), frame)
 
 
 def test_compute_financial_features_uses_latest_roe():

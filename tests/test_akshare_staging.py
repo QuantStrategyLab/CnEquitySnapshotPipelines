@@ -1,14 +1,24 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pandas as pd
 import pytest
 
 from cn_equity_snapshot_pipelines.akshare_market_history import build_market_history_frame, normalize_symbol
 from cn_equity_snapshot_pipelines.akshare_staging import build_factor_row_from_akshare, build_factor_snapshot_from_akshare
+from cn_equity_snapshot_pipelines import akshare_staging as staging
+
+
+@pytest.fixture(autouse=True)
+def frozen_staging_clock(monkeypatch):
+    clock = Mock(return_value=datetime(2026, 6, 27, 23, 59, tzinfo=timezone.utc))
+    monkeypatch.setattr(staging, "datetime", SimpleNamespace(now=clock))
+    return clock
 
 
 def test_resolve_universe_symbols_expanded_from_fhps():
@@ -25,7 +35,8 @@ def test_resolve_universe_symbols_expanded_from_fhps():
     assert symbols == ("601088", "600519")
 
 
-def test_build_factor_snapshot_falls_back_to_sample():
+def test_build_factor_snapshot_falls_back_to_sample(monkeypatch):
+    monkeypatch.setattr(staging, "_import_akshare", Mock(side_effect=RuntimeError("synthetic unavailable")))
     sample_path = Path(__file__).resolve().parents[1] / "examples" / "dividend_quality" / "factor_snapshot.sample.csv"
     frame, diagnostics = build_factor_snapshot_from_akshare(
         symbols=("999999",),
@@ -37,6 +48,76 @@ def test_build_factor_snapshot_falls_back_to_sample():
     assert diagnostics["source"] == "sample_fallback"
     assert "as_of" in frame.columns
     assert len(frame) >= 1
+
+
+@pytest.mark.parametrize("as_of", ["2026-06-26", "2026-06-28", "invalid", "", "2026-02-30"])
+@pytest.mark.parametrize("entrypoint", ["builder", "writer", "cli"])
+def test_current_only_rejects_date_before_adapter_or_output(monkeypatch, tmp_path, as_of, entrypoint):
+    importer = Mock(side_effect=RuntimeError("synthetic unavailable"))
+    monkeypatch.setattr(staging, "_import_akshare", importer)
+    sample = Path(__file__).resolve().parents[1] / "examples/dividend_quality/factor_snapshot.sample.csv"
+    output = tmp_path / "not-created" / "snapshot.csv"
+
+    with pytest.raises(ValueError, match="current-only.*UTC"):
+        if entrypoint == "builder":
+            staging.build_factor_snapshot_from_akshare(as_of=as_of, sample_fallback_path=sample)
+        elif entrypoint == "writer":
+            staging.write_staging_factor_snapshot(output_path=output, as_of=as_of, sample_fallback_path=sample)
+        else:
+            staging.main(["--output", str(output), "--as-of", as_of, "--sample-fallback", str(sample)])
+
+    importer.assert_not_called()
+    assert not output.parent.exists()
+
+
+@pytest.mark.parametrize("as_of", [None, "2026-06-27"])
+def test_current_snapshot_keeps_one_utc_date_across_midnight(monkeypatch, frozen_staging_clock, as_of):
+    def fhps_table(**kwargs):
+        frozen_staging_clock.return_value = datetime(2026, 6, 28, tzinfo=timezone.utc)
+        return pd.DataFrame({"代码": ["000001"]})
+
+    ak = SimpleNamespace(
+        stock_fhps_em=Mock(side_effect=fhps_table),
+        stock_zh_a_hist=Mock(return_value=pd.DataFrame({
+            "日期": ["2026-06-25", "2026-06-26", "2026-06-28"],
+            "收盘": [10.0, 11.0, 999.0], "成交额": [100.0, 200.0, 900.0], "成交量": [1, 1, 1],
+        })),
+        stock_financial_analysis_indicator=Mock(return_value=pd.DataFrame({
+            "日期": ["2026-03-31"], "净资产报酬率(%)": [10.0], "摊薄每股收益(元)": [1.0],
+        })),
+        stock_history_dividend_detail=Mock(return_value=pd.DataFrame()),
+    )
+    monkeypatch.setattr(staging, "_import_akshare", Mock(return_value=ak))
+    frame, diagnostics = staging.build_factor_snapshot_from_akshare(
+        symbols=("000001",), min_rows=1, as_of=as_of, sector_map={},
+    )
+
+    assert diagnostics["source"] == "akshare"
+    assert list(frame["as_of"]) == ["2026-06-27"]  # Saturday is a valid acquisition date.
+    assert list(frame["close_cny"]) == [11.0]  # Prior-session bars remain valid inputs.
+    assert ak.stock_zh_a_hist.call_args.kwargs["end_date"] == "20260627"
+    frozen_staging_clock.assert_called_once_with(timezone.utc)
+
+
+@pytest.mark.parametrize("date_column", ["as_of", "snapshot_date"])
+def test_sample_fallback_preserves_original_fixture_date(monkeypatch, date_column):
+    sample = pd.DataFrame([{column: 0 for column in staging.FACTOR_SNAPSHOT_COLUMNS}])
+    sample.insert(0, date_column, "2020-01-02")
+    monkeypatch.setattr(staging.pd, "read_csv", lambda path: sample.copy())
+    monkeypatch.setattr(staging, "_import_akshare", Mock(side_effect=RuntimeError("synthetic unavailable")))
+    frame, diagnostics = staging.build_factor_snapshot_from_akshare(sample_fallback_path="synthetic.csv")
+
+    assert diagnostics["source"] == "sample_fallback"
+    assert list(frame[date_column]) == ["2020-01-02"]
+
+
+def test_writer_rejects_sample_before_creating_output(monkeypatch, tmp_path):
+    monkeypatch.setattr(staging, "_import_akshare", Mock(side_effect=RuntimeError("synthetic unavailable")))
+    sample = Path(__file__).resolve().parents[1] / "examples/dividend_quality/factor_snapshot.sample.csv"
+    output = tmp_path / "not-created" / "snapshot.csv"
+    with pytest.raises(ValueError, match="sample fallback.*cannot be written"):
+        staging.write_staging_factor_snapshot(output_path=output, sample_fallback_path=sample)
+    assert not output.parent.exists()
 
 
 def test_build_factor_row_from_mocked_akshare_sources():
