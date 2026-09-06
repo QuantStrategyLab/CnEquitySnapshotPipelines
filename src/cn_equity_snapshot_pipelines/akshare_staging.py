@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -42,7 +42,8 @@ def _load_sample_fallback(sample_path: Path) -> pd.DataFrame:
     if missing:
         missing_text = ", ".join(missing)
         raise ValueError(f"sample fallback missing columns: {missing_text}")
-    return frame.loc[:, FACTOR_SNAPSHOT_COLUMNS].copy()
+    date_columns = [column for column in ("as_of", "snapshot_date") if column in frame.columns]
+    return frame.loc[:, [*date_columns, *FACTOR_SNAPSHOT_COLUMNS]].copy()
 
 
 def _import_akshare():
@@ -68,8 +69,8 @@ def _fetch_fhps_table(ak) -> pd.DataFrame:
     raise RuntimeError("stock_fhps_em returned no data for candidate report dates")
 
 
-def _fetch_history(ak, symbol: str) -> pd.DataFrame:
-    end_date = datetime.now(timezone.utc).strftime("%Y%m%d")
+def _fetch_history(ak, symbol: str, *, as_of: date) -> pd.DataFrame:
+    end_date = as_of.strftime("%Y%m%d")
     return ak.stock_zh_a_hist(
         symbol=normalize_symbol(symbol),
         period="daily",
@@ -79,8 +80,8 @@ def _fetch_history(ak, symbol: str) -> pd.DataFrame:
     )
 
 
-def _fetch_financials(ak, symbol: str) -> pd.DataFrame:
-    start_year = str(datetime.now(timezone.utc).year - 4)
+def _fetch_financials(ak, symbol: str, *, as_of: date) -> pd.DataFrame:
+    start_year = str(as_of.year - 4)
     return ak.stock_financial_analysis_indicator(symbol=normalize_symbol(symbol), start_year=start_year)
 
 
@@ -126,7 +127,10 @@ def build_factor_row_from_akshare(
     fetch_financials: Callable[[str], pd.DataFrame] | None = None,
     fetch_dividends: Callable[[str], pd.DataFrame] | None = None,
     fetch_sector: Callable[[str], str] | None = None,
+    as_of: date | None = None,
 ) -> dict[str, object]:
+    """Combine current sources; as_of bounds bars, not financial publication or revision history."""
+    resolved_date = as_of if as_of is not None else datetime.now(timezone.utc).date()
     needs_akshare = any(
         item is None
         for item in (fetch_history, fetch_financials, fetch_dividends, fetch_sector, fhps_table)
@@ -136,13 +140,13 @@ def build_factor_row_from_akshare(
         ak_module = _import_akshare()
     if fhps_table is None and ak_module is not None:
         fhps_table = _fetch_fhps_table(ak_module)
-    history_loader = fetch_history or (lambda item: _fetch_history(ak_module, item))
-    financial_loader = fetch_financials or (lambda item: _fetch_financials(ak_module, item))
+    history_loader = fetch_history or (lambda item: _fetch_history(ak_module, item, as_of=resolved_date))
+    financial_loader = fetch_financials or (lambda item: _fetch_financials(ak_module, item, as_of=resolved_date))
     dividend_loader = fetch_dividends or (lambda item: _fetch_dividends(ak_module, item))
     sector_loader = fetch_sector or (lambda item: _fetch_sector(ak_module, item, sector_map=sector_map))
 
     normalized = normalize_symbol(symbol)
-    price = compute_price_features(history_loader(normalized))
+    price = compute_price_features(history_loader(normalized), as_of=resolved_date)
     financials = compute_financial_features(financial_loader(normalized))
     dividend_stability_3y = compute_dividend_stability(dividend_loader(normalized))
 
@@ -174,6 +178,11 @@ def build_factor_snapshot_from_akshare(
     sector_map: dict[str, str] | None = None,
     refresh_sector_map: bool = False,
 ) -> tuple[pd.DataFrame, dict[str, object]]:
+    """Build current-only factors, or return a diagnosed offline sample fallback."""
+    resolved_date = datetime.now(timezone.utc).date()
+    if as_of is not None and as_of != resolved_date.isoformat():
+        raise ValueError("AkShare factors are current-only; as_of must be UTC today in YYYY-MM-DD format")
+    as_of = resolved_date.isoformat()
     diagnostics: dict[str, object] = {
         "source": "akshare",
         "requested_symbols": list(symbols),
@@ -215,6 +224,7 @@ def build_factor_snapshot_from_akshare(
                     ak=ak,
                     fhps_table=fhps_table,
                     sector_map=sector_map,
+                    as_of=resolved_date,
                 )
             )
         except Exception as exc:
@@ -256,6 +266,8 @@ def write_staging_factor_snapshot(
         sector_map=sector_map,
         refresh_sector_map=refresh_sector_map,
     )
+    if diagnostics["source"] == "sample_fallback":
+        raise ValueError("sample fallback is offline-only and cannot be written as a staged factor snapshot")
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(path, index=False)
@@ -275,7 +287,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--expanded-top-n", type=int, default=40)
     parser.add_argument("--refresh-sector-map", action="store_true")
-    parser.add_argument("--as-of", default=None, help="Optional as_of date (YYYY-MM-DD). Defaults to UTC today.")
+    parser.add_argument(
+        "--as-of", default=None,
+        help="Current-only acquisition date (YYYY-MM-DD); omit or use UTC today. Historical factors are unsupported.",
+    )
     # Resolve sample fallback path robustly (works from repo root or installed package)
     _default_sample = Path(__file__).resolve().parents[2] / "examples" / "dividend_quality" / "factor_snapshot.sample.csv"
     if not _default_sample.exists():

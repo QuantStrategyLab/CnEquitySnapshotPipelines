@@ -52,9 +52,17 @@ def _coerce_float(value: Any, default: float = 0.0) -> float:
 
 
 def compute_price_features(hist: pd.DataFrame, *, as_of: date | None = None) -> dict[str, float | int]:
+    """Limit input bar dates, without asserting publication or adjustment point-in-time validity."""
     if hist.empty:
         raise ValueError("history must not be empty")
-    frame = hist.sort_values("日期").copy()
+    frame = hist.copy()
+    frame["日期"] = pd.to_datetime(frame["日期"], errors="coerce")
+    if frame["日期"].isna().any():
+        raise ValueError("history dates must be valid")
+    as_of_ts = pd.Timestamp(as_of or datetime.now(timezone.utc).date()).normalize()
+    frame = frame.loc[frame["日期"] <= as_of_ts].sort_values("日期")
+    if frame.empty:
+        raise ValueError("history has no bars on or before as_of")
     close = pd.to_numeric(frame["收盘"], errors="coerce")
     turnover = pd.to_numeric(frame["成交额"], errors="coerce")
     volume = pd.to_numeric(frame["成交量"], errors="coerce")
@@ -83,7 +91,6 @@ def compute_price_features(hist: pd.DataFrame, *, as_of: date | None = None) -> 
 
     suspension_days_63 = int((volume.tail(63).fillna(0) <= 0).sum())
     first_date = pd.to_datetime(frame["日期"].iloc[0], errors="coerce")
-    as_of_ts = pd.Timestamp(as_of or datetime.now(timezone.utc).date()).normalize()
     list_days = 2000
     if pd.notna(first_date):
         list_days = max(int((as_of_ts - first_date.normalize()).days), 1)
@@ -196,6 +203,7 @@ def merge_factor_row(
 
 
 def stamp_as_of(frame: pd.DataFrame, *, as_of: str | date | None = None) -> pd.DataFrame:
+    """Label a frame without proving when its source data became available."""
     output = frame.copy()
     if "as_of" in output.columns or "snapshot_date" in output.columns:
         return output
