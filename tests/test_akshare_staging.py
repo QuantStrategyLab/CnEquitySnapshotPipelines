@@ -355,3 +355,72 @@ def test_history_coverage_rejects_truncated_series() -> None:
             start_date=pd.Timestamp("2024-01-01"),
             end_date=pd.Timestamp("2024-12-31"),
         )
+
+
+def test_benchmark_continuity_rejects_mid_gap_when_peers_have_prices() -> None:
+    """510300 may not miss a session that other symbols already observed after its first bar."""
+    from cn_equity_snapshot_pipelines import akshare_market_history as module
+
+    frame = pd.DataFrame(
+        [
+            {"date": "2026-09-16", "symbol": "510300", "close": 1.0},
+            {"date": "2026-09-17", "symbol": "510300", "close": 1.1},
+            # 2026-09-18 missing for benchmark while peers have prices
+            {"date": "2026-09-16", "symbol": "510500", "close": 2.0},
+            {"date": "2026-09-17", "symbol": "510500", "close": 2.1},
+            {"date": "2026-09-18", "symbol": "510500", "close": 2.2},
+            {"date": "2026-09-16", "symbol": "159915", "close": 3.0},
+            {"date": "2026-09-17", "symbol": "159915", "close": 3.1},
+            {"date": "2026-09-18", "symbol": "159915", "close": 3.2},
+        ]
+    )
+
+    with pytest.raises(ValueError, match=r"benchmark 510300.*2026-09-18"):
+        module._validate_benchmark_continuity(frame)
+
+
+def test_benchmark_continuity_allows_pre_benchmark_and_later_listed_gaps() -> None:
+    from cn_equity_snapshot_pipelines import akshare_market_history as module
+
+    frame = pd.DataFrame(
+        [
+            # Peer observed before benchmark's first valid day — allowed
+            {"date": "2026-09-15", "symbol": "159994", "close": 1.0},
+            {"date": "2026-09-16", "symbol": "510300", "close": 1.0},
+            {"date": "2026-09-17", "symbol": "510300", "close": 1.1},
+            {"date": "2026-09-18", "symbol": "510300", "close": 1.2},
+            {"date": "2026-09-16", "symbol": "510500", "close": 2.0},
+            {"date": "2026-09-17", "symbol": "510500", "close": 2.1},
+            {"date": "2026-09-18", "symbol": "510500", "close": 2.2},
+            # Later-listed ETF starts after benchmark — allowed
+            {"date": "2026-09-18", "symbol": "159792", "close": 3.0},
+        ]
+    )
+
+    module._validate_benchmark_continuity(frame)
+
+
+def test_build_market_history_frame_rejects_benchmark_mid_gap(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cn_equity_snapshot_pipelines import akshare_market_history as module
+
+    def _fetch(symbol: str, **kwargs):
+        if symbol == "510300":
+            return pd.DataFrame(
+                {
+                    "date": ["2026-09-16", "2026-09-17"],
+                    "symbol": [symbol, symbol],
+                    "close": [1.0, 1.1],
+                }
+            )
+        return pd.DataFrame(
+            {
+                "date": ["2026-09-16", "2026-09-17", "2026-09-18"],
+                "symbol": [symbol, symbol, symbol],
+                "close": [2.0, 2.1, 2.2],
+            }
+        )
+
+    monkeypatch.setattr(module, "fetch_etf_history", _fetch)
+
+    with pytest.raises(ValueError, match=r"benchmark 510300.*2026-09-18"):
+        build_market_history_frame(("510300", "510500"), ak=object(), request_delay_seconds=0)

@@ -36,6 +36,7 @@ DEFAULT_ETF_SYMBOLS = (
     "512690",
     "159928",
 )
+BENCHMARK_SYMBOL = "510300"
 PRICE_BASIS = "adjusted_close_equivalent"
 MAX_BOUNDARY_GAP_DAYS = 14
 MIN_BUSINESS_DAY_COVERAGE = 0.75
@@ -362,6 +363,44 @@ def _validate_history_coverage(
         raise ValueError(f"incomplete adjusted ETF history coverage for {symbol}")
 
 
+def _validate_benchmark_continuity(
+    frame: pd.DataFrame,
+    *,
+    benchmark: str = BENCHMARK_SYMBOL,
+) -> None:
+    """Reject mid-series gaps in the benchmark after its first observed bar.
+
+    After the benchmark's first valid date, every date that carries any symbol's
+    market price must also include the benchmark. Earlier peer-only dates and
+    later-listed symbols with shorter histories remain allowed.
+    """
+    if frame.empty:
+        raise ValueError(f"missing benchmark {benchmark} history")
+    normalized = frame.copy()
+    normalized["symbol"] = normalized["symbol"].map(normalize_symbol)
+    normalized["date"] = pd.to_datetime(normalized["date"], errors="coerce")
+    normalized = normalized.dropna(subset=["date", "symbol", "close"])
+    if normalized.empty:
+        raise ValueError(f"missing benchmark {benchmark} history")
+    benchmark_rows = normalized.loc[normalized["symbol"] == normalize_symbol(benchmark)]
+    if benchmark_rows.empty:
+        raise ValueError(f"missing benchmark {benchmark} history")
+    benchmark_dates = {value.date().isoformat() for value in benchmark_rows["date"]}
+    first_valid = min(benchmark_dates)
+    observed_after_first = {
+        value.date().isoformat()
+        for value in normalized["date"]
+        if value.date().isoformat() >= first_valid
+    }
+    missing = sorted(observed_after_first - benchmark_dates)
+    if missing:
+        sample = ", ".join(missing[:5])
+        raise ValueError(
+            f"benchmark {normalize_symbol(benchmark)} missing market sessions "
+            f"after first valid day ({first_valid}): {sample}"
+        )
+
+
 def fetch_tencent_etf_history(
     symbol: str,
     *,
@@ -579,6 +618,8 @@ def build_market_history_frame(
         raise RuntimeError(f"failed to fetch ETF histories: {missing}")
     history = pd.concat(frames, ignore_index=True)
     history = history.sort_values(["symbol", "date"]).reset_index(drop=True)
+    if BENCHMARK_SYMBOL in requested_symbols:
+        _validate_benchmark_continuity(history)
     return history
 
 
