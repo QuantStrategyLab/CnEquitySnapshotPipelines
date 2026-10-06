@@ -1,14 +1,5 @@
 # CnEquitySnapshotPipelines
 
-
-## QSL architecture role
-
-- **Layer**: `pipeline`.
-- **Responsibility**: A-share snapshot and evidence pipeline.
-- **Owns**: validated factor snapshots, manifests, ranking previews, release evidence.
-- **Consumes**: CnEquityStrategies metadata and upstream market inputs.
-- **Must not**: place broker orders or decide live enablement alone.
-
 [Chinese README](README.zh-CN.md)
 
 > Investing involves risk. This project does not provide investment advice and is for education, research, and engineering review only.
@@ -18,6 +9,14 @@
 `CnEquitySnapshotPipelines` builds feature-snapshot artifacts, manifests, ranking previews, and release summaries for snapshot-backed A-share strategy runtimes in QuantStrategyLab.
 
 This repository produces evidence and artifacts. It does not place broker orders, store broker credentials, or make a strategy live by itself.
+
+## QSL architecture role
+
+- **Layer**: `pipeline`.
+- **Responsibility**: A-share snapshot and evidence pipeline.
+- **Owns**: validated factor snapshots, manifests, ranking previews, release evidence.
+- **Consumes**: CnEquityStrategies metadata and upstream market inputs.
+- **Must not**: place broker orders or decide live enablement alone.
 
 ## Active snapshot profile
 
