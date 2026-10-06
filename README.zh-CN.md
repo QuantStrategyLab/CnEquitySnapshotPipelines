@@ -1,14 +1,5 @@
 # CnEquitySnapshotPipelines
 
-
-## QSL 架构角色
-
-- **层级**：`快照/证据流水线`。
-- **职责**：A 股快照与证据流水线。
-- **事实源/归属**：已验证 factor snapshots、manifests、ranking previews、release evidence。
-- **消费对象**：CnEquityStrategies 元数据和上游市场输入。
-- **禁止事项**：下券商订单或单独决定 live enablement。
-
 [English README](README.md)
 
 > 投资有风险。本项目不构成投资建议，仅用于学习、研究和工程审阅。
@@ -18,6 +9,14 @@
 `CnEquitySnapshotPipelines` 为 QuantStrategyLab 的 A 股 snapshot-backed 策略 runtime 构建 feature snapshot artifact、manifest、ranking 预览和 release summary。
 
 本仓库只产出证据与 artifact，不下单，不保存券商凭据，也不能单独决定某个策略是否 live。
+
+## QSL 架构角色
+
+- **层级**：`快照/证据流水线`。
+- **职责**：A 股快照与证据流水线。
+- **事实源/归属**：已验证 factor snapshots、manifests、ranking previews、release evidence。
+- **消费对象**：CnEquityStrategies 元数据和上游市场输入。
+- **禁止事项**：下券商订单或单独决定 live enablement。
 
 ## 当前 active snapshot profile
 
