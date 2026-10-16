@@ -1,69 +1,92 @@
 # CnEquitySnapshotPipelines
 
-[Chinese README](README.zh-CN.md)
+Feature-snapshot pipeline that builds validated A-share factor snapshots and evidence artifacts for QuantStrategyLab strategy runtimes.
 
-> Investing involves risk. This project does not provide investment advice and is for education, research, and engineering review only.
+English | [简体中文](README.zh-CN.md)
 
-## What this repository is
+## Status
 
-`CnEquitySnapshotPipelines` builds feature-snapshot artifacts, manifests, ranking previews, and release summaries for snapshot-backed A-share strategy runtimes in QuantStrategyLab.
+Experimental. Use at your own risk. This project is not financial advice and
+does not guarantee any trading result. Its outputs are research evidence, not
+trading instructions.
 
-This repository produces evidence and artifacts. It does not place broker orders, store broker credentials, or make a strategy live by itself.
+## What this is
 
-## QSL architecture role
+CnEquitySnapshotPipelines builds factor-snapshot artifacts, manifests, ranking
+previews, and release summaries for snapshot-backed A-share strategy runtimes.
+It reads factor input CSVs, or stages them from public data with AkShare, and
+emits a versioned artifact pack under a stable contract. Downstream strategy and
+execution repositories consume only validated artifacts.
 
-- **Layer**: `pipeline`.
-- **Responsibility**: A-share snapshot and evidence pipeline.
-- **Owns**: validated factor snapshots, manifests, ranking previews, release evidence.
-- **Consumes**: CnEquityStrategies metadata and upstream market inputs.
-- **Must not**: place broker orders or decide live enablement alone.
+## What this is not
 
-## Active snapshot profile
-
-| Profile | Display name | Contract | Builder |
-| --- | --- | --- | --- |
-| `cn_dividend_quality_snapshot` | CN Dividend Quality Snapshot | `cn_dividend_quality_snapshot.factor_snapshot.v1` | `cneq-build-dividend-quality-snapshot` |
-| `cn_chinext_growth_momentum_quality_snapshot` | CN ChiNext Growth Momentum Quality Snapshot | `cn_chinext_growth_momentum_quality_snapshot.factor_snapshot.v1` | `cneq-build-chinext-growth-momentum-quality-snapshot` |
+It does not place broker orders. It does not store broker credentials. It does
+not make a strategy live on its own.
 
 ## Quick start
+
+Requires Python 3.11 or newer.
 
 ```bash
 python -m pip install -e '.[test]'
 python -m pytest -q
 ```
 
-Build a sample artifact pack locally:
+Build the sample artifact packs from the bundled example inputs:
 
 ```bash
-PYTHONPATH=src python scripts/build_dividend_quality_sample.py
-PYTHONPATH=src python scripts/build_chinext_growth_momentum_quality_sample.py
+python scripts/build_dividend_quality_sample.py
+python scripts/build_chinext_growth_momentum_quality_sample.py
 ```
 
-Stage real factor inputs via AkShare (falls back to sample CSV on failure):
-
-```bash
-cneq-stage-akshare-dividend-quality --output data/staging/dividend_quality/factor_snapshot.latest.csv
-cneq-stage-akshare-market-history --output data/staging/market_history/etf_universe.latest.csv
-```
-
-Or use the installed entrypoint:
+Or run an installed builder:
 
 ```bash
 cneq-build-dividend-quality-snapshot \
   --factor-snapshot examples/dividend_quality/factor_snapshot.sample.csv \
   --output-dir data/output/dividend_quality
-
-cneq-build-chinext-growth-momentum-quality-snapshot \
-  --factor-snapshot examples/chinext_growth_momentum_quality/factor_snapshot.sample.csv \
-  --output-dir data/output/chinext_growth_momentum_quality
 ```
 
-## Downstream use
+To stage factor inputs from public data, install the optional extra:
 
-`CnEquityStrategies` and future `QmtPlatform` should consume only validated artifacts for runtime-enabled profiles.
+```bash
+python -m pip install -e '.[public-data]'
+cneq-stage-akshare-dividend-quality --output data/staging/dividend_quality/factor_snapshot.latest.csv
+```
 
-See [`docs/artifact_contract.md`](docs/artifact_contract.md) for the factor snapshot schema.
+## Configuration
+
+The builders take command-line flags rather than environment variables.
+
+| Flag | Required | Default | Purpose |
+|---|---|---|---|
+| `--factor-snapshot` | Yes | none | Factor input CSV; the expected columns are in [`docs/artifact_contract.md`](docs/artifact_contract.md). |
+| `--output-dir` | No | `data/output/<profile>` | Directory for the generated artifact pack. |
+| `--min-adv20-cny` | No | `0.0` | Minimum 20-day average traded value filter. |
+| `--min-market-cap-cny` | No | `0.0` | Minimum market-cap filter. |
+| `--as-of` | No | UTC today | Snapshot date in `YYYY-MM-DD` form. |
+| `--output` | No | `data/staging/<profile>/factor_snapshot.latest.csv` | Output path for the AkShare staging commands. |
+
+## Repository layout
+
+```
+src/        snapshot builders, contracts, and lifecycle helpers
+scripts/    sample-build scripts
+examples/   sample factor inputs
+docs/       artifact contract and design notes
+tests/      unit and contract tests
+data/       local working output
+```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Security
+
+See [SECURITY.md](SECURITY.md). Do not open a public issue for a vulnerability.
+Keep credentials, private data, and external service tokens out of Git and logs.
 
 ## License
 
-See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
