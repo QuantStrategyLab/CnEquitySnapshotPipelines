@@ -8,3 +8,9 @@ build/
 .DS_Store
 data/output/
 data/cache/
+
+# Keep AI rule files and shared engineering conventions tracked even when a
+# personal global ignore excludes Markdown.
+!AGENTS.md
+!CLAUDE.md
+!.github/engineering.md

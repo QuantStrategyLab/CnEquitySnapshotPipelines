@@ -73,7 +73,7 @@ data/       本地工作输出
 
 ## 参与贡献
 
-见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+见 [CONTRIBUTING.md](CONTRIBUTING.md)。AI 助手与维护者遵循 [AGENTS.md](AGENTS.md)。
 
 ## 安全
 
