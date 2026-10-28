@@ -37,6 +37,8 @@ python -m pytest -q
 CI also builds the package. Data staging against public sources is a separate,
 networked operation; do not run it as part of a documentation change.
 
+Organization documentation rules are checked by `python scripts/check_style.py`, which also runs in CI as the `Documentation check` job.
+
 ## Naming and documentation
 
 - Developer documentation is English by default; Chinese siblings use
