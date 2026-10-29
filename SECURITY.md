@@ -20,7 +20,7 @@ If you suspect tokens, API keys, or other CI/CD secrets were exposed:
 
 ## Artifact Integrity
 
-If you find a way to make this pipeline produce a snapshot, manifest, or ranking preview that misrepresents its inputs (for example, bypassing point-in-time safety or validation checks described in [`docs/artifact_contract.md`](docs/artifact_contract.md)), please report it the same way as a security issue, since downstream repositories consume these artifacts without re-deriving them.
+If you find a way to make this pipeline produce a snapshot, manifest, or ranking preview that misrepresents its inputs (for example, bypassing point-in-time safety or validation checks described in [`docs/artifact-contract.md`](docs/artifact-contract.md)), please report it the same way as a security issue, since downstream repositories consume these artifacts without re-deriving them.
 
 ## Scope Notes
 

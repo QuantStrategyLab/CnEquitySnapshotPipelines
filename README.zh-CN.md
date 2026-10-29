@@ -53,7 +53,7 @@ cneq-stage-akshare-dividend-quality --output data/staging/dividend_quality/facto
 
 | 参数 | 必填 | 默认值 | 用途 |
 |---|---|---|---|
-| `--factor-snapshot` | 是 | 无 | 因子输入 CSV；期望列见 [`docs/artifact_contract.md`](docs/artifact_contract.md)。 |
+| `--factor-snapshot` | 是 | 无 | 因子输入 CSV；期望列见 [`docs/artifact-contract.md`](docs/artifact-contract.md)。 |
 | `--output-dir` | 否 | `data/output/<profile>` | 生成的产物包目录。 |
 | `--min-adv20-cny` | 否 | `0.0` | 20 日平均成交额下限过滤。 |
 | `--min-market-cap-cny` | 否 | `0.0` | 市值下限过滤。 |
