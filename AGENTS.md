@@ -60,7 +60,7 @@ Organization documentation rules are checked by `python scripts/check_style.py`,
 - Do not describe a snapshot as proof of historical point-in-time coverage; the
   pipeline produces artifacts, not a PIT guarantee.
 - Do not commit generated output, caches or downloaded market data.
-- Do not change the artifact contract without updating `docs/artifact_contract.md`
+- Do not change the artifact contract without updating `docs/artifact-contract.md`
   and the downstream consumers that read it.
 
 ## Commits and pull requests

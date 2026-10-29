@@ -60,7 +60,7 @@ The builders take command-line flags rather than environment variables.
 
 | Flag | Required | Default | Purpose |
 |---|---|---|---|
-| `--factor-snapshot` | Yes | none | Factor input CSV; the expected columns are in [`docs/artifact_contract.md`](docs/artifact_contract.md). |
+| `--factor-snapshot` | Yes | none | Factor input CSV; the expected columns are in [`docs/artifact-contract.md`](docs/artifact-contract.md). |
 | `--output-dir` | No | `data/output/<profile>` | Directory for the generated artifact pack. |
 | `--min-adv20-cny` | No | `0.0` | Minimum 20-day average traded value filter. |
 | `--min-market-cap-cny` | No | `0.0` | Minimum market-cap filter. |
