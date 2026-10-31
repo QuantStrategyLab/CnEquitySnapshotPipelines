@@ -68,6 +68,8 @@ Organization documentation rules are checked by `python scripts/check_style.py`,
 
 ## Do not
 
+- Only the owner, or a reviewer explicitly authorized by the owner, may apply the `owner-approved` label; coding agents must never apply it to their own PRs.
+
 - Do not describe a snapshot as proof of historical point-in-time coverage; the
   pipeline produces artifacts, not a PIT guarantee.
 - Do not commit generated output, caches or downloaded market data.
