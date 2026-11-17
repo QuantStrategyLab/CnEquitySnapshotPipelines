@@ -14,4 +14,4 @@
 
 离线测试使用合成输入、模拟两设备，并让实际策略 consumer 读取发布结果。这证明字节和调用链契约，不证明免费数据源已覆盖所需历史，也不等于真实回测或 shadow 验证。
 
-本片固定采用 CN `2a0c5c9aafacfbe6519fb4029ca4ac18e4996a66` 与 QPK `b5654244aa5d08bce2b4b4f931436268d57216df`。新建环境按 lockfile 实际安装，清除 PYTHONPATH 后核实两包均来自 site-packages 且 commit 身份一致；禁网运行本仓全部 145 项测试通过，12 个已安装包依赖兼容，Ruff、diff 检查及 wheel/sdist 构建通过。独立审查验证了发布结果被实际 CN reader 接受，以及第二份存储失败后的保留与补齐；未取得真实行情或创建研究候选。
+此处验证采用锁文件固定的 CnEquityStrategies 与 QuantPlatformKit 版本。新建环境按 lockfile 实际安装，清除 PYTHONPATH 后核实两包均来自 site-packages 且 commit 身份一致；禁网运行本仓全部 145 项测试通过，12 个已安装包依赖兼容，Ruff、diff 检查及 wheel/sdist 构建通过。独立审查验证了发布结果被实际 CN reader 接受，以及第二份存储失败后的保留与补齐；未取得真实行情或创建研究候选。
