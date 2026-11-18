@@ -67,6 +67,10 @@ The builders take command-line flags rather than environment variables.
 | `--as-of` | No | UTC today | Snapshot date in `YYYY-MM-DD` form. |
 | `--output` | No | `data/staging/<profile>/factor_snapshot.latest.csv` | Output path for the AkShare staging commands. |
 
+## Architecture
+
+Inputs arrive either as factor CSVs (staged locally or via AkShare) or as licensed index-ETF JSON exports. Builders validate schemas and timing boundaries, emit immutable versioned artifact packs with manifests and checksums under [`docs/artifact-contract.md`](docs/artifact-contract.md), and publish strict daily-bar backtest inputs via `cneq-publish-index-etf-input` as documented in [`docs/index-etf-execution-input.md`](docs/index-etf-execution-input.md) ([简体中文](docs/index-etf-execution-input.zh-CN.md)).
+
 ## Repository layout
 
 ```

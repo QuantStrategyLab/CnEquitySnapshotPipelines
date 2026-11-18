@@ -60,6 +60,10 @@ cneq-stage-akshare-dividend-quality --output data/staging/dividend_quality/facto
 | `--as-of` | 否 | UTC 当天 | snapshot 日期，格式 `YYYY-MM-DD`。 |
 | `--output` | 否 | `data/staging/<profile>/factor_snapshot.latest.csv` | AkShare 暂存命令的输出路径。 |
 
+## 架构
+
+输入来源包括因子 CSV（本地或经 AkShare 暂存）以及已取得许可的指数 ETF JSON 导出。各 builder 校验字段与时间边界后，按 [`docs/artifact-contract.md`](docs/artifact-contract.md) 生成带 manifest 与校验和的不可变版本化产物包，并通过 `cneq-publish-index-etf-input` 发布严格日线回测输入（见 [`docs/index-etf-execution-input.zh-CN.md`](docs/index-etf-execution-input.zh-CN.md) | [English](docs/index-etf-execution-input.md)）。
+
 ## 仓库结构
 
 ```
