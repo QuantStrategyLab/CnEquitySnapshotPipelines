@@ -10,6 +10,6 @@ def test_publish_market_history_workflow_is_real_and_fail_closed() -> None:
     assert "--source tencent" in workflow
     assert "--start-date 20220101" in workflow
     assert "cn_etf_market_history.csv" in workflow
-    assert "actions/upload-artifact@v4" in workflow
+    assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in workflow
     assert "if-no-files-found: error" in workflow
     assert "github.event.repository.default_branch" in workflow
